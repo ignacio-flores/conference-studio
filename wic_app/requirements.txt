@@ -1,0 +1,6 @@
+streamlit
+streamlit-sortables
+pandas
+openpyxl
+xlsxwriter
+reportlab
