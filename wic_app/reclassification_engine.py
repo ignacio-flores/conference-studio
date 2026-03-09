@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import csv
+import copy
 import re
+import shutil
+import uuid
 import zipfile
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
@@ -10,6 +13,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
+from engine.classification import classify_papers as classify_papers_core
+from engine.config import ConferenceConfig, load_conference_config, resolve_config_path
+from engine.scheduling import apply_paper_placements as apply_paper_placements_core
+from engine.scheduling import apply_programme_layout_overrides as apply_programme_layout_overrides_core
+from engine.scheduling import build_equal_time_ranges
+from engine.validation import validate_programme_state as validate_programme_state_core
 
 NS = {
     "main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
@@ -19,34 +28,29 @@ NS = {
 APP_DIR = Path(__file__).resolve().parent
 BASE_DIR = APP_DIR.parent
 SOURCE_DIR = BASE_DIR / "source_data"
-
-SUBMISSIONS_FILE = SOURCE_DIR / "WIC 2026 - Submissions (Reviewed).xlsx"
-PROGRAMME_FILE = SOURCE_DIR / "WIC2026_Programme.xlsx"
-
 STATE_DIR = APP_DIR / "state"
+EXPORT_DIR = BASE_DIR / "exports"
+
+ACTIVE_CONFERENCE_CONFIG = load_conference_config()
+
+SUBMISSIONS_FILE = SOURCE_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("submissions", "WIC 2026 - Submissions (Reviewed).xlsx")
+PROGRAMME_FILE = SOURCE_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("programme", "WIC2026_Programme.xlsx")
+
 CLASSIFICATION_OVERRIDES_FILE = STATE_DIR / "classification_overrides.csv"
 SESSION_NAME_OVERRIDES_FILE = STATE_DIR / "session_name_overrides.csv"
 PROGRAMME_LAYOUT_OVERRIDES_FILE = STATE_DIR / "programme_layout_overrides.csv"
+SESSION_STRUCTURE_FILE = STATE_DIR / "session_structure.csv"
+PAPER_PLACEMENTS_FILE = STATE_DIR / "paper_placements.csv"
+MANUAL_TALKS_FILE = STATE_DIR / "manual_talks.csv"
 
-EXPORT_DIR = BASE_DIR / "exports"
-DRAFT_OUTPUT_FILE = EXPORT_DIR / "WIC2026_Programme_Draft.xlsx"
-PUBLISH_XLSX_FILE = EXPORT_DIR / "WIC2026_Programme_Publish.xlsx"
-PUBLISH_PDF_FILE = EXPORT_DIR / "WIC2026_Programme_Publish.pdf"
+DRAFT_OUTPUT_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("draft_output", "WIC2026_Programme_Draft.xlsx")
+PUBLISH_XLSX_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("publish_xlsx_output", "WIC2026_Programme_Publish.xlsx")
+PUBLISH_PDF_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("publish_pdf_output", "WIC2026_Programme_Publish.pdf")
 
-DAY_ORDER = ["Day 1 (4th June)", "Day 2 (5th June)", "Day 3 (6th June)"]
-DAY_TO_NUM = {day: idx for idx, day in enumerate(DAY_ORDER, start=1)}
+DAY_ORDER = list(ACTIVE_CONFERENCE_CONFIG.days)
+DAY_TO_NUM = ACTIVE_CONFERENCE_CONFIG.day_to_num
 
-ROOM_PRIORITY = {
-    "R2-01": 10,
-    "R2-21": 20,
-    "R1-09": 30,
-    "R2-20": 40,
-    "R1-10": 50,
-    "R3-71": 60,
-    "TBD-A": 70,
-    "TBD-B": 80,
-    "TBD-C": 90,
-}
+ROOM_PRIORITY = dict(ACTIVE_CONFERENCE_CONFIG.room_priority)
 
 THEME_ORDER = [
     "Measurement of historical income and wealth inequality dynamics",
@@ -314,6 +318,32 @@ SUBTHEME_RULES = {
     ],
 }
 
+
+def _hydrate_theme_constants(config: ConferenceConfig) -> None:
+    global THEME_ORDER, THEME_SHORT, THEME_ALIAS, THEME_KEYWORDS, SUBTHEME_RULES
+    THEME_ORDER = list(config.themes.order)
+    THEME_SHORT = dict(config.themes.short)
+    THEME_ALIAS = dict(config.themes.alias)
+    THEME_KEYWORDS = {
+        theme: list(words)
+        for theme, words in config.themes.keywords.items()
+    }
+    SUBTHEME_RULES = {
+        theme: [(rule.label, list(rule.keywords)) for rule in rules]
+        for theme, rules in config.themes.subtheme_rules.items()
+    }
+
+
+def _hydrate_runtime_constants(config: ConferenceConfig) -> None:
+    global DAY_ORDER, DAY_TO_NUM, ROOM_PRIORITY
+    DAY_ORDER = list(config.days)
+    DAY_TO_NUM = config.day_to_num
+    ROOM_PRIORITY = dict(config.room_priority)
+    _hydrate_theme_constants(config)
+
+
+_hydrate_runtime_constants(ACTIVE_CONFERENCE_CONFIG)
+
 CLASSIFICATION_HEADERS = [
     "SubmissionID",
     "OverridePrimaryTheme",
@@ -334,6 +364,44 @@ PROGRAMME_LAYOUT_HEADERS = [
     "UpdatedAt",
 ]
 
+SESSION_STRUCTURE_HEADERS = [
+    "SessionId",
+    "SessionCode",
+    "Status",
+    "DayLabel",
+    "DayNum",
+    "BlockLabel",
+    "BlockNum",
+    "TimeLabel",
+    "StartMin",
+    "EndMin",
+    "Room",
+    "Capacity",
+    "Source",
+    "UpdatedAt",
+]
+
+PAPER_PLACEMENT_HEADERS = [
+    "SubmissionID",
+    "PlacementStatus",
+    "SessionId",
+    "TalkIndex",
+    "OverflowOrder",
+    "UpdatedAt",
+]
+
+MANUAL_TALKS_HEADERS = [
+    "SubmissionID",
+    "FullName",
+    "EmailAddress",
+    "Title",
+    "Abstract",
+    "Themes",
+    "LinkToPDF",
+    "ReviewerScore",
+    "UpdatedAt",
+]
+
 
 @dataclass
 class Paper:
@@ -345,6 +413,7 @@ class Paper:
     title: str
     abstract: str
     link_to_pdf: str
+    source: str = "submissions"
     primary_theme: str = ""
     detailed_subtheme: str = ""
     secondary_tags: List[str] = field(default_factory=list)
@@ -352,6 +421,7 @@ class Paper:
     rationale: str = ""
     reviewed: bool = False
     override_notes: str = ""
+    session_id: str = ""
     session_code: str = ""
     session_title: str = ""
     day_label: str = ""
@@ -361,6 +431,8 @@ class Paper:
     time: str = ""
     room: str = ""
     talk_index: int = 0
+    talk_start_min: int = 0
+    talk_end_min: int = 0
     placement_status: str = "scheduled"
     overflow_order: int = 0
 
@@ -382,13 +454,19 @@ class Slot:
 
 @dataclass
 class Session:
+    session_id: str
     session_code: str
+    status: str
     day_label: str
     day_num: int
     time: str
     block_label: str
     block_num: int
     room: str
+    start_min: int
+    end_min: int
+    capacity: int
+    source: str
     session_title: str
     primary_theme: str
     subtheme: str
@@ -400,9 +478,12 @@ class Session:
 class ProgrammeState:
     papers: List[Paper]
     sessions: List[Session]
+    inactive_sessions: List[Session]
+    all_sessions: List[Session]
     validations: Dict[str, object]
     unassigned_papers: List[Paper] = field(default_factory=list)
     slot_conflicts: List[Dict[str, str]] = field(default_factory=list)
+    edited_submission_ids: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -412,6 +493,45 @@ class PackedGroup:
     dominant_primary: str
     dominant_subtheme: str
     auto_title: str
+
+
+_BASE_PARSE_CACHE: Dict[Tuple[str, str, str], Tuple[List[Paper], List[Slot]]] = {}
+
+
+def _file_signature(path: Path) -> str:
+    if not path.exists():
+        return f"{path.resolve()}::MISSING"
+    stat = path.stat()
+    return f"{path.resolve()}::{stat.st_mtime_ns}::{stat.st_size}"
+
+
+def _base_cache_key(submissions_path: Path, programme_path: Path, config: ConferenceConfig) -> Tuple[str, str, str]:
+    return (_file_signature(submissions_path), _file_signature(programme_path), config.signature())
+
+
+def _compute_edited_submission_ids(
+    class_overrides: Dict[str, Dict[str, str]],
+    layout_overrides: Dict[str, Dict[str, str]],
+) -> set[str]:
+    edited: set[str] = set()
+    for sid, row in class_overrides.items():
+        if (
+            str(row.get("OverridePrimaryTheme", "")).strip()
+            or str(row.get("OverrideSubtheme", "")).strip()
+            or str(row.get("OverrideNotes", "")).strip()
+            or parse_bool(str(row.get("Reviewed", "")))
+        ):
+            edited.add(sid)
+
+    for sid, row in layout_overrides.items():
+        status = str(row.get("PlacementStatus", "")).strip().lower()
+        session_code = str(row.get("SessionCode", "")).strip()
+        talk_index = str(row.get("TalkIndex", "")).strip()
+        overflow_order = str(row.get("OverflowOrder", "")).strip()
+        if status in {"unassigned", "overflow"} or session_code or talk_index or overflow_order:
+            edited.add(sid)
+
+    return edited
 
 
 class XlsxXmlReader:
@@ -517,6 +637,23 @@ def parse_start_minutes(time_range: str) -> int:
     return hour * 60 + minute
 
 
+def parse_end_minutes(time_range: str, default_duration: int = 90) -> int:
+    text = str(time_range or "")
+    parts = text.split("-", 1)
+    start = parse_start_minutes(text)
+    if len(parts) < 2:
+        return start + default_duration
+    end_match = re.search(r"(\d{1,2})h(\d{0,2})", parts[1])
+    if not end_match:
+        return start + default_duration
+    end_h = int(end_match.group(1))
+    end_m = int(end_match.group(2)) if end_match.group(2) else 0
+    end = end_h * 60 + end_m
+    if end <= start:
+        end += 24 * 60
+    return end
+
+
 def format_minutes(total_minutes: int) -> str:
     return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
 
@@ -527,6 +664,14 @@ def room_sort_key(room: str) -> Tuple[int, str]:
 
 def parse_bool(value: str) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _parse_positive_int(raw: str, default: int = 0) -> int:
+    try:
+        value = int(str(raw).strip())
+        return value if value > 0 else default
+    except Exception:
+        return default
 
 
 def build_group_slices(total_items: int) -> List[int]:
@@ -591,9 +736,11 @@ def classify_subtheme(primary_theme: str, text: str) -> Tuple[str, List[str]]:
     return best_label, best_hits[:5]
 
 
-def parse_submissions(path: Path) -> List[Paper]:
+def parse_submissions(path: Path, config: ConferenceConfig = ACTIVE_CONFERENCE_CONFIG) -> List[Paper]:
+    if not path.exists():
+        return []
     reader = XlsxXmlReader(path)
-    rows = reader.read_sheet_rows("Sheet1")
+    rows = reader.read_sheet_rows(config.parsing.submissions_sheet)
     if not rows:
         raise RuntimeError("Submissions file appears empty")
 
@@ -616,10 +763,11 @@ def parse_submissions(path: Path) -> List[Paper]:
     if missing:
         raise RuntimeError(f"Missing expected columns: {missing}")
 
+    accepted_scores = set(config.parsing.accepted_reviewer_scores)
     accepted: List[Paper] = []
     for _, cells in rows[1:]:
         score = str(cells.get(col_idx["ReviewerScore"], "")).strip()
-        if score != "1":
+        if score not in accepted_scores:
             continue
 
         accepted.append(
@@ -638,11 +786,18 @@ def parse_submissions(path: Path) -> List[Paper]:
     return accepted
 
 
-def parse_programme_slots(path: Path) -> List[Slot]:
+def parse_programme_slots(path: Path, config: ConferenceConfig = ACTIVE_CONFERENCE_CONFIG) -> List[Slot]:
+    if not path.exists():
+        return []
     reader = XlsxXmlReader(path)
     slots: List[Slot] = []
+    parsing = config.parsing.programme
+    room_name_pattern = re.compile(parsing.room_name_pattern)
+    session_label_regex = re.compile(parsing.session_label_regex)
+    required_token = parsing.session_required_token.upper()
+    optional_token = parsing.optional_token.upper()
 
-    for day_name in DAY_ORDER:
+    for day_name in config.days:
         rows = reader.read_sheet_rows(day_name)
         matrix: Dict[Tuple[int, int], str] = {}
         for row_num, cells in rows:
@@ -650,42 +805,41 @@ def parse_programme_slots(path: Path) -> List[Slot]:
                 matrix[(row_num, col_num)] = value
 
         room_cols = []
-        for col_num in range(4, 40):
-            name = matrix.get((3, col_num), "")
-            if re.match(r"^(Amphi|R\d+-\d+)$", name):
+        for col_num in range(parsing.room_column_start, parsing.room_column_end + 1):
+            name = matrix.get((parsing.room_header_row, col_num), "")
+            if room_name_pattern.match(name):
                 room_cols.append(col_num)
 
-        for row_num in range(1, 90):
-            block_label = matrix.get((row_num, 3), "")
+        for row_num in range(parsing.scan_row_start, parsing.scan_row_end + 1):
+            block_label = matrix.get((row_num, parsing.block_column), "")
             block_upper = block_label.upper()
-            if "SESSION" not in block_upper:
+            if required_token not in block_upper:
                 continue
-            if "OPTIONAL" in block_upper:
-                continue
-
-            time_label = matrix.get((row_num, 2), "")
-            if day_name == "Day 1 (4th June)" and time_label.strip() == "9h30-10h":
-                # Opening plenary period has no paper presentations.
+            if optional_token and optional_token in block_upper:
                 continue
 
-            session_match = re.search(r"SESSION\s*(\d+)", block_upper)
+            time_label = matrix.get((row_num, parsing.time_column), "")
+            if any(window.matches(day_name, time_label) for window in parsing.skip_time_windows):
+                continue
+
+            session_match = session_label_regex.search(block_upper)
             block_num = int(session_match.group(1)) if session_match else 0
 
             open_rooms: List[str] = []
             for col_num in room_cols:
                 if matrix.get((row_num, col_num), "") == "":
-                    open_rooms.append(matrix.get((3, col_num), f"Room-{col_num}"))
+                    open_rooms.append(matrix.get((parsing.room_header_row, col_num), f"Room-{col_num}"))
 
-            extra_rooms = ["TBD-A", "TBD-B"]
-            if day_name == "Day 2 (5th June)" and block_num in {2, 3, 4}:
-                extra_rooms.append("TBD-C")
-
+            extra_rooms: List[str] = []
+            for rule in parsing.extra_rooms:
+                if rule.matches(day_name, block_num):
+                    extra_rooms.extend(list(rule.rooms))
             all_rooms = open_rooms + extra_rooms
             for room in all_rooms:
                 slots.append(
                     Slot(
                         day_label=day_name,
-                        day_num=DAY_TO_NUM[day_name],
+                        day_num=config.day_to_num[day_name],
                         time=time_label,
                         block_label=block_label,
                         block_num=block_num,
@@ -702,6 +856,9 @@ def ensure_state_files(
     classification_overrides_file: Path = CLASSIFICATION_OVERRIDES_FILE,
     session_name_overrides_file: Path = SESSION_NAME_OVERRIDES_FILE,
     programme_layout_overrides_file: Path = PROGRAMME_LAYOUT_OVERRIDES_FILE,
+    session_structure_file: Path = SESSION_STRUCTURE_FILE,
+    paper_placements_file: Path = PAPER_PLACEMENTS_FILE,
+    manual_talks_file: Path = MANUAL_TALKS_FILE,
 ) -> None:
     state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -718,6 +875,21 @@ def ensure_state_files(
     if not programme_layout_overrides_file.exists():
         with programme_layout_overrides_file.open("w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=PROGRAMME_LAYOUT_HEADERS)
+            writer.writeheader()
+
+    if not session_structure_file.exists():
+        with session_structure_file.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=SESSION_STRUCTURE_HEADERS)
+            writer.writeheader()
+
+    if not paper_placements_file.exists():
+        with paper_placements_file.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=PAPER_PLACEMENT_HEADERS)
+            writer.writeheader()
+
+    if not manual_talks_file.exists():
+        with manual_talks_file.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=MANUAL_TALKS_HEADERS)
             writer.writeheader()
 
 
@@ -803,7 +975,29 @@ def write_session_name_overrides(overrides: Dict[str, str], path: Path = SESSION
 
 def load_programme_layout_overrides(
     path: Path = PROGRAMME_LAYOUT_OVERRIDES_FILE,
+    paper_placements_path: Path = PAPER_PLACEMENTS_FILE,
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
 ) -> Dict[str, Dict[str, str]]:
+    placements = load_paper_placements(paper_placements_path)
+    if placements:
+        session_rows = load_session_structure_rows(session_structure_path)
+        session_id_to_code = {
+            str(row.get("SessionId", "")).strip(): str(row.get("SessionCode", "")).strip()
+            for row in session_rows.values()
+        }
+        out: Dict[str, Dict[str, str]] = {}
+        for sid, row in placements.items():
+            session_id = str(row.get("SessionId", "")).strip()
+            out[sid] = {
+                "SubmissionID": sid,
+                "PlacementStatus": str(row.get("PlacementStatus", "")).strip(),
+                "SessionCode": session_id_to_code.get(session_id, "") if session_id else "",
+                "TalkIndex": str(row.get("TalkIndex", "")).strip(),
+                "OverflowOrder": str(row.get("OverflowOrder", "")).strip(),
+                "UpdatedAt": str(row.get("UpdatedAt", "")).strip(),
+            }
+        return out
+
     rows = _load_csv_rows(path, PROGRAMME_LAYOUT_HEADERS)
     out: Dict[str, Dict[str, str]] = {}
     for row in rows:
@@ -817,9 +1011,19 @@ def load_programme_layout_overrides(
 def write_programme_layout_overrides(
     rows: Iterable[Dict[str, str]],
     path: Path = PROGRAMME_LAYOUT_OVERRIDES_FILE,
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    paper_placements_path: Path = PAPER_PLACEMENTS_FILE,
 ) -> None:
-    normalized: Dict[str, Dict[str, str]] = {}
     now = datetime.utcnow().isoformat(timespec="seconds")
+    session_rows = load_session_structure_rows(session_structure_path)
+    code_to_id = {}
+    for row in session_rows.values():
+        session_code = str(row.get("SessionCode", "")).strip()
+        session_id = str(row.get("SessionId", "")).strip()
+        if session_code and session_id:
+            code_to_id[session_code] = session_id
+
+    placements: Dict[str, Dict[str, str]] = {}
     for row in rows:
         sid = str(row.get("SubmissionID", "")).strip()
         if not sid:
@@ -827,89 +1031,631 @@ def write_programme_layout_overrides(
         status = str(row.get("PlacementStatus", "")).strip().lower()
         if status not in {"scheduled", "unassigned", "overflow"}:
             status = "scheduled"
-        normalized[sid] = {
+        session_code = str(row.get("SessionCode", "")).strip()
+        session_id = code_to_id.get(session_code, "")
+        if status in {"scheduled", "overflow"} and not session_id:
+            status = "unassigned"
+        placements[sid] = {
             "SubmissionID": sid,
             "PlacementStatus": status,
+            "SessionId": session_id if status in {"scheduled", "overflow"} else "",
+            "TalkIndex": str(row.get("TalkIndex", "")).strip() if status == "scheduled" else "",
+            "OverflowOrder": str(row.get("OverflowOrder", "")).strip() if status == "overflow" else "",
+            "UpdatedAt": str(row.get("UpdatedAt", "")).strip() or now,
+        }
+
+    write_paper_placements(placements.values(), paper_placements_path)
+
+
+def load_session_structure_rows(path: Path = SESSION_STRUCTURE_FILE) -> Dict[str, Dict[str, str]]:
+    rows = _load_csv_rows(path, SESSION_STRUCTURE_HEADERS)
+    out: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        session_id = str(row.get("SessionId", "")).strip()
+        if not session_id:
+            continue
+        status = str(row.get("Status", "active")).strip().lower()
+        if status not in {"active", "inactive"}:
+            status = "active"
+        normalized = {
+            "SessionId": session_id,
             "SessionCode": str(row.get("SessionCode", "")).strip(),
-            "TalkIndex": str(row.get("TalkIndex", "")).strip(),
-            "OverflowOrder": str(row.get("OverflowOrder", "")).strip(),
+            "Status": status,
+            "DayLabel": str(row.get("DayLabel", "")).strip(),
+            "DayNum": str(row.get("DayNum", "")).strip(),
+            "BlockLabel": str(row.get("BlockLabel", "")).strip(),
+            "BlockNum": str(row.get("BlockNum", "")).strip(),
+            "TimeLabel": str(row.get("TimeLabel", "")).strip(),
+            "StartMin": str(row.get("StartMin", "")).strip(),
+            "EndMin": str(row.get("EndMin", "")).strip(),
+            "Room": str(row.get("Room", "")).strip(),
+            "Capacity": str(row.get("Capacity", "")).strip(),
+            "Source": str(row.get("Source", "")).strip() or "template",
+            "UpdatedAt": str(row.get("UpdatedAt", "")).strip(),
+        }
+        out[session_id] = normalized
+    return out
+
+
+def write_session_structure_rows(rows: Iterable[Dict[str, str]], path: Path = SESSION_STRUCTURE_FILE) -> None:
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    normalized: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        session_id = str(row.get("SessionId", "")).strip() or str(uuid.uuid4())
+        status = str(row.get("Status", "active")).strip().lower()
+        if status not in {"active", "inactive"}:
+            status = "active"
+        capacity = _parse_positive_int(row.get("Capacity", "4"), default=4)
+        start_min = _parse_positive_int(row.get("StartMin", "0"), default=0)
+        end_min = _parse_positive_int(row.get("EndMin", "0"), default=max(1, start_min + 90))
+        if end_min <= start_min:
+            end_min = start_min + 90
+        normalized[session_id] = {
+            "SessionId": session_id,
+            "SessionCode": str(row.get("SessionCode", "")).strip(),
+            "Status": status,
+            "DayLabel": str(row.get("DayLabel", "")).strip(),
+            "DayNum": str(row.get("DayNum", "")).strip(),
+            "BlockLabel": str(row.get("BlockLabel", "")).strip(),
+            "BlockNum": str(row.get("BlockNum", "")).strip(),
+            "TimeLabel": str(row.get("TimeLabel", "")).strip(),
+            "StartMin": str(start_min),
+            "EndMin": str(end_min),
+            "Room": str(row.get("Room", "")).strip(),
+            "Capacity": str(capacity),
+            "Source": str(row.get("Source", "")).strip() or "manual",
             "UpdatedAt": str(row.get("UpdatedAt", "")).strip() or now,
         }
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=PROGRAMME_LAYOUT_HEADERS)
+        writer = csv.DictWriter(f, fieldnames=SESSION_STRUCTURE_HEADERS)
+        writer.writeheader()
+        for session_id in sorted(normalized.keys()):
+            writer.writerow(normalized[session_id])
+
+
+def load_paper_placements(path: Path = PAPER_PLACEMENTS_FILE) -> Dict[str, Dict[str, str]]:
+    rows = _load_csv_rows(path, PAPER_PLACEMENT_HEADERS)
+    out: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        sid = str(row.get("SubmissionID", "")).strip()
+        if not sid:
+            continue
+        status = str(row.get("PlacementStatus", "")).strip().lower()
+        if status not in {"scheduled", "unassigned", "overflow"}:
+            status = "unassigned"
+        out[sid] = {
+            "SubmissionID": sid,
+            "PlacementStatus": status,
+            "SessionId": str(row.get("SessionId", "")).strip() if status in {"scheduled", "overflow"} else "",
+            "TalkIndex": str(row.get("TalkIndex", "")).strip() if status == "scheduled" else "",
+            "OverflowOrder": str(row.get("OverflowOrder", "")).strip() if status == "overflow" else "",
+            "UpdatedAt": str(row.get("UpdatedAt", "")).strip(),
+        }
+    return out
+
+
+def write_paper_placements(rows: Iterable[Dict[str, str]], path: Path = PAPER_PLACEMENTS_FILE) -> None:
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    normalized: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        sid = str(row.get("SubmissionID", "")).strip()
+        if not sid:
+            continue
+        status = str(row.get("PlacementStatus", "")).strip().lower()
+        if status not in {"scheduled", "unassigned", "overflow"}:
+            status = "unassigned"
+        normalized[sid] = {
+            "SubmissionID": sid,
+            "PlacementStatus": status,
+            "SessionId": str(row.get("SessionId", "")).strip() if status in {"scheduled", "overflow"} else "",
+            "TalkIndex": str(row.get("TalkIndex", "")).strip() if status == "scheduled" else "",
+            "OverflowOrder": str(row.get("OverflowOrder", "")).strip() if status == "overflow" else "",
+            "UpdatedAt": str(row.get("UpdatedAt", "")).strip() or now,
+        }
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=PAPER_PLACEMENT_HEADERS)
         writer.writeheader()
         for sid in sorted(normalized.keys(), key=lambda x: (len(x), x)):
             writer.writerow(normalized[sid])
+
+
+def load_manual_talks(path: Path = MANUAL_TALKS_FILE) -> List[Paper]:
+    rows = _load_csv_rows(path, MANUAL_TALKS_HEADERS)
+    out: List[Paper] = []
+    for idx, row in enumerate(rows, start=1):
+        sid = str(row.get("SubmissionID", "")).strip() or f"MANUAL-{idx:04d}"
+        out.append(
+            Paper(
+                submission_id=sid,
+                full_name=str(row.get("FullName", "")).strip(),
+                email=str(row.get("EmailAddress", "")).strip(),
+                reviewer_score=str(row.get("ReviewerScore", "1")).strip() or "1",
+                source_themes=str(row.get("Themes", "")).strip(),
+                title=str(row.get("Title", "")).strip(),
+                abstract=str(row.get("Abstract", "")).strip(),
+                link_to_pdf=str(row.get("LinkToPDF", "")).strip(),
+                source="manual",
+            )
+        )
+    return out
+
+
+def write_manual_talks(rows: Iterable[Dict[str, str]], path: Path = MANUAL_TALKS_FILE) -> None:
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    normalized: Dict[str, Dict[str, str]] = {}
+    counter = 1
+    for row in rows:
+        sid = str(row.get("SubmissionID", "")).strip()
+        if not sid:
+            sid = f"MANUAL-{counter:04d}"
+            counter += 1
+        normalized[sid] = {
+            "SubmissionID": sid,
+            "FullName": str(row.get("FullName", "")).strip(),
+            "EmailAddress": str(row.get("EmailAddress", "")).strip(),
+            "Title": str(row.get("Title", "")).strip(),
+            "Abstract": str(row.get("Abstract", "")).strip(),
+            "Themes": str(row.get("Themes", "")).strip(),
+            "LinkToPDF": str(row.get("LinkToPDF", "")).strip(),
+            "ReviewerScore": str(row.get("ReviewerScore", "1")).strip() or "1",
+            "UpdatedAt": str(row.get("UpdatedAt", "")).strip() or now,
+        }
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=MANUAL_TALKS_HEADERS)
+        writer.writeheader()
+        for sid in sorted(normalized.keys(), key=lambda x: (len(x), x)):
+            writer.writerow(normalized[sid])
+
+
+def _parse_block_num_from_label(block_label: str, default: int = 0) -> int:
+    match = re.search(r"(\d+)", str(block_label))
+    if not match:
+        return default
+    try:
+        return int(match.group(1))
+    except Exception:
+        return default
+
+
+def _next_available_session_code(base_code: str, active_codes: set[str]) -> str:
+    candidate = base_code
+    suffix = 2
+    while candidate in active_codes:
+        candidate = f"{base_code}-{suffix}"
+        suffix += 1
+    return candidate
+
+
+def validate_session_structure_rows(
+    rows: Iterable[Dict[str, str]],
+    config: ConferenceConfig = ACTIVE_CONFERENCE_CONFIG,
+) -> List[str]:
+    errors: List[str] = []
+    seen_ids: set[str] = set()
+    active_rows: List[Dict[str, str]] = []
+
+    for row in rows:
+        session_id = str(row.get("SessionId", "")).strip()
+        if not session_id:
+            errors.append("SessionId is required for all rows.")
+            continue
+        if session_id in seen_ids:
+            errors.append(f"Duplicate SessionId detected: {session_id}")
+            continue
+        seen_ids.add(session_id)
+
+        status = str(row.get("Status", "active")).strip().lower()
+        if status not in {"active", "inactive"}:
+            errors.append(f"Invalid Status for {session_id}: {status}")
+            continue
+        if status != "active":
+            continue
+        active_rows.append(row)
+
+    if config.structure.enforce_unique_session_code:
+        seen_codes: Dict[str, str] = {}
+        for row in active_rows:
+            session_id = str(row.get("SessionId", "")).strip()
+            session_code = str(row.get("SessionCode", "")).strip()
+            if not session_code:
+                errors.append(f"Active session {session_id} must have SessionCode.")
+                continue
+            existing_id = seen_codes.get(session_code)
+            if existing_id and existing_id != session_id:
+                errors.append(f"Duplicate active SessionCode: {session_code}")
+            else:
+                seen_codes[session_code] = session_id
+
+    if not config.structure.allow_duplicate_day_time_room:
+        seen_slots: Dict[Tuple[str, str, str], str] = {}
+        for row in active_rows:
+            session_id = str(row.get("SessionId", "")).strip()
+            day_num = str(row.get("DayNum", "")).strip()
+            time_label = str(row.get("TimeLabel", "")).strip()
+            room = str(row.get("Room", "")).strip()
+            if not day_num or not time_label or not room:
+                errors.append(f"Active session {session_id} must define DayNum, TimeLabel, and Room.")
+                continue
+            key = (day_num, time_label, room)
+            existing_id = seen_slots.get(key)
+            if existing_id and existing_id != session_id:
+                errors.append(
+                    f"Duplicate active slot DayNum={day_num}, TimeLabel={time_label}, Room={room}."
+                )
+            else:
+                seen_slots[key] = session_id
+
+    for row in active_rows:
+        session_id = str(row.get("SessionId", "")).strip()
+        capacity = _parse_positive_int(str(row.get("Capacity", "0")), default=0)
+        if capacity <= 0:
+            errors.append(f"Active session {session_id} must have Capacity >= 1.")
+        start_min = _parse_positive_int(str(row.get("StartMin", "0")), default=0)
+        end_min = _parse_positive_int(str(row.get("EndMin", "0")), default=0)
+        if end_min <= start_min:
+            errors.append(f"Active session {session_id} has invalid time bounds StartMin={start_min}, EndMin={end_min}.")
+
+    return sorted(set(errors))
+
+
+def clear_session(
+    session_id: str,
+    paper_placements_path: Path = PAPER_PLACEMENTS_FILE,
+) -> Dict[str, object]:
+    target_session_id = str(session_id).strip()
+    if not target_session_id:
+        return {"ok": False, "error": "SessionId is required."}
+
+    placements = load_paper_placements(paper_placements_path)
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    changed = 0
+    for row in placements.values():
+        if str(row.get("SessionId", "")).strip() != target_session_id:
+            continue
+        status = str(row.get("PlacementStatus", "")).strip().lower()
+        if status not in {"scheduled", "overflow"}:
+            continue
+        row["PlacementStatus"] = "unassigned"
+        row["SessionId"] = ""
+        row["TalkIndex"] = ""
+        row["OverflowOrder"] = ""
+        row["UpdatedAt"] = now
+        changed += 1
+
+    if changed > 0:
+        write_paper_placements(placements.values(), paper_placements_path)
+    return {"ok": True, "moved_to_unassigned": changed}
+
+
+def remove_session(
+    session_id: str,
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    paper_placements_path: Path = PAPER_PLACEMENTS_FILE,
+) -> Dict[str, object]:
+    target_session_id = str(session_id).strip()
+    if not target_session_id:
+        return {"ok": False, "error": "SessionId is required."}
+
+    rows = load_session_structure_rows(session_structure_path)
+    target = rows.get(target_session_id)
+    if target is None:
+        return {"ok": False, "error": f"Session not found: {target_session_id}"}
+
+    target["Status"] = "inactive"
+    target["UpdatedAt"] = datetime.utcnow().isoformat(timespec="seconds")
+    rows[target_session_id] = target
+    write_session_structure_rows(rows.values(), session_structure_path)
+
+    clear_result = clear_session(target_session_id, paper_placements_path)
+    if not clear_result.get("ok", False):
+        return clear_result
+    return {
+        "ok": True,
+        "session_id": target_session_id,
+        "session_code": str(target.get("SessionCode", "")).strip(),
+        "moved_to_unassigned": int(clear_result.get("moved_to_unassigned", 0) or 0),
+    }
+
+
+def restore_session(
+    session_id: str,
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    config_path: Optional[Path] = None,
+) -> Dict[str, object]:
+    target_session_id = str(session_id).strip()
+    if not target_session_id:
+        return {"ok": False, "error": "SessionId is required."}
+
+    config = load_conference_config(config_path)
+    rows = load_session_structure_rows(session_structure_path)
+    target = rows.get(target_session_id)
+    if target is None:
+        return {"ok": False, "error": f"Session not found: {target_session_id}"}
+
+    target["Status"] = "active"
+    target["UpdatedAt"] = datetime.utcnow().isoformat(timespec="seconds")
+    rows[target_session_id] = target
+
+    errors = validate_session_structure_rows(rows.values(), config)
+    if errors:
+        return {"ok": False, "error": errors[0], "errors": errors}
+
+    write_session_structure_rows(rows.values(), session_structure_path)
+    return {
+        "ok": True,
+        "session_id": target_session_id,
+        "session_code": str(target.get("SessionCode", "")).strip(),
+    }
+
+
+def create_session(
+    day_label: str,
+    block_label: str,
+    time_label: str,
+    room: str,
+    capacity: int = 4,
+    day_num: Optional[int] = None,
+    block_num: Optional[int] = None,
+    start_min: Optional[int] = None,
+    end_min: Optional[int] = None,
+    session_code: str = "",
+    source: str = "manual",
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    config_path: Optional[Path] = None,
+) -> Dict[str, object]:
+    config = load_conference_config(config_path)
+    rows = load_session_structure_rows(session_structure_path)
+    now = datetime.utcnow().isoformat(timespec="seconds")
+
+    day_label_clean = str(day_label).strip()
+    block_label_clean = str(block_label).strip()
+    time_label_clean = str(time_label).strip()
+    room_clean = str(room).strip()
+    if not (day_label_clean and time_label_clean and room_clean):
+        return {"ok": False, "error": "DayLabel, TimeLabel, and Room are required."}
+
+    resolved_day_num = int(day_num) if day_num is not None else config.day_to_num.get(day_label_clean, 0)
+    if resolved_day_num <= 0:
+        resolved_day_num = _parse_positive_int(str(day_num or ""), default=0)
+    resolved_block_num = (
+        int(block_num)
+        if block_num is not None
+        else _parse_block_num_from_label(block_label_clean, default=0)
+    )
+    resolved_start_min = int(start_min) if start_min is not None else parse_start_minutes(time_label_clean)
+    resolved_end_min = (
+        int(end_min)
+        if end_min is not None
+        else parse_end_minutes(time_label_clean, default_duration=90)
+    )
+    if resolved_end_min <= resolved_start_min:
+        resolved_end_min = resolved_start_min + 90
+    resolved_capacity = _parse_positive_int(str(capacity), default=config.structure.default_session_capacity)
+
+    active_rows = [row for row in rows.values() if str(row.get("Status", "active")).strip().lower() == "active"]
+    active_codes = {str(row.get("SessionCode", "")).strip() for row in active_rows}
+    base_code = str(session_code).strip() or _default_session_code(resolved_day_num, resolved_block_num, room_clean)
+    if config.structure.enforce_unique_session_code and base_code in active_codes:
+        if str(session_code).strip():
+            return {"ok": False, "error": f"Active SessionCode already exists: {base_code}"}
+        base_code = _next_available_session_code(base_code, active_codes)
+
+    if not config.structure.allow_duplicate_day_time_room:
+        duplicate = next(
+            (
+                row
+                for row in active_rows
+                if str(row.get("DayNum", "")).strip() == str(resolved_day_num)
+                and str(row.get("TimeLabel", "")).strip() == time_label_clean
+                and str(row.get("Room", "")).strip() == room_clean
+            ),
+            None,
+        )
+        if duplicate is not None:
+            duplicate_code = str(duplicate.get("SessionCode", "")).strip()
+            return {
+                "ok": False,
+                "error": (
+                    "An active session already exists for the same day/time/room: "
+                    f"{duplicate_code or duplicate.get('SessionId', '')}"
+                ),
+            }
+
+    session_id = str(uuid.uuid4())
+    rows[session_id] = {
+        "SessionId": session_id,
+        "SessionCode": base_code,
+        "Status": "active",
+        "DayLabel": day_label_clean,
+        "DayNum": str(resolved_day_num),
+        "BlockLabel": block_label_clean,
+        "BlockNum": str(resolved_block_num),
+        "TimeLabel": time_label_clean,
+        "StartMin": str(resolved_start_min),
+        "EndMin": str(resolved_end_min),
+        "Room": room_clean,
+        "Capacity": str(resolved_capacity),
+        "Source": str(source).strip() or "manual",
+        "UpdatedAt": now,
+    }
+
+    errors = validate_session_structure_rows(rows.values(), config)
+    if errors:
+        return {"ok": False, "error": errors[0], "errors": errors}
+
+    write_session_structure_rows(rows.values(), session_structure_path)
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "session_code": base_code,
+    }
+
+
+def add_room_session(
+    day_label: str,
+    block_label: str,
+    time_label: str,
+    room: str,
+    capacity: int = 4,
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    config_path: Optional[Path] = None,
+) -> Dict[str, object]:
+    return create_session(
+        day_label=day_label,
+        block_label=block_label,
+        time_label=time_label,
+        room=room,
+        capacity=capacity,
+        source="manual",
+        session_structure_path=session_structure_path,
+        config_path=config_path,
+    )
+
+
+def update_session_structure_row(
+    session_id: str,
+    updates: Dict[str, object],
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    config_path: Optional[Path] = None,
+) -> Dict[str, object]:
+    target_session_id = str(session_id).strip()
+    if not target_session_id:
+        return {"ok": False, "error": "SessionId is required."}
+
+    config = load_conference_config(config_path)
+    rows = load_session_structure_rows(session_structure_path)
+    row = rows.get(target_session_id)
+    if row is None:
+        return {"ok": False, "error": f"Session not found: {target_session_id}"}
+
+    candidate = dict(row)
+    for key in [
+        "SessionCode",
+        "Status",
+        "DayLabel",
+        "DayNum",
+        "BlockLabel",
+        "BlockNum",
+        "TimeLabel",
+        "StartMin",
+        "EndMin",
+        "Room",
+        "Capacity",
+        "Source",
+    ]:
+        if key not in updates:
+            continue
+        candidate[key] = str(updates.get(key, "")).strip()
+
+    if "DayNum" not in updates and candidate.get("DayLabel", "").strip():
+        day_num = config.day_to_num.get(candidate["DayLabel"].strip(), 0)
+        if day_num > 0:
+            candidate["DayNum"] = str(day_num)
+    if "BlockNum" not in updates:
+        candidate["BlockNum"] = str(
+            _parse_positive_int(candidate.get("BlockNum", ""), default=_parse_block_num_from_label(candidate.get("BlockLabel", ""), default=0))
+        )
+    if "StartMin" not in updates:
+        candidate["StartMin"] = str(
+            _parse_positive_int(candidate.get("StartMin", ""), default=parse_start_minutes(candidate.get("TimeLabel", "")))
+        )
+    if "EndMin" not in updates:
+        candidate["EndMin"] = str(
+            _parse_positive_int(candidate.get("EndMin", ""), default=parse_end_minutes(candidate.get("TimeLabel", ""), default_duration=90))
+        )
+    if "Capacity" not in updates:
+        candidate["Capacity"] = str(
+            _parse_positive_int(candidate.get("Capacity", ""), default=config.structure.default_session_capacity)
+        )
+
+    candidate["UpdatedAt"] = datetime.utcnow().isoformat(timespec="seconds")
+    rows[target_session_id] = candidate
+    errors = validate_session_structure_rows(rows.values(), config)
+    if errors:
+        return {"ok": False, "error": errors[0], "errors": errors}
+
+    write_session_structure_rows(rows.values(), session_structure_path)
+    return {"ok": True, "session_id": target_session_id, "session_code": candidate.get("SessionCode", "")}
+
+
+def create_manual_talk(
+    full_name: str,
+    title: str,
+    abstract: str = "",
+    themes: str = "",
+    email: str = "",
+    link_to_pdf: str = "",
+    reviewer_score: str = "1",
+    submission_id: str = "",
+    manual_talks_path: Path = MANUAL_TALKS_FILE,
+    paper_placements_path: Path = PAPER_PLACEMENTS_FILE,
+) -> Dict[str, object]:
+    name = str(full_name).strip()
+    talk_title = str(title).strip()
+    if not name or not talk_title:
+        return {"ok": False, "error": "Full name and title are required for manual talks."}
+
+    existing_rows = _load_csv_rows(manual_talks_path, MANUAL_TALKS_HEADERS)
+    existing_ids = {str(row.get("SubmissionID", "")).strip() for row in existing_rows}
+
+    sid = str(submission_id).strip()
+    if not sid:
+        sid = f"MANUAL-{uuid.uuid4().hex[:8].upper()}"
+    if sid in existing_ids:
+        return {"ok": False, "error": f"SubmissionID already exists in manual talks: {sid}"}
+
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    existing_rows.append(
+        {
+            "SubmissionID": sid,
+            "FullName": name,
+            "EmailAddress": str(email).strip(),
+            "Title": talk_title,
+            "Abstract": str(abstract).strip(),
+            "Themes": str(themes).strip(),
+            "LinkToPDF": str(link_to_pdf).strip(),
+            "ReviewerScore": str(reviewer_score).strip() or "1",
+            "UpdatedAt": now,
+        }
+    )
+    write_manual_talks(existing_rows, manual_talks_path)
+
+    placements = load_paper_placements(paper_placements_path)
+    if sid not in placements:
+        placements[sid] = {
+            "SubmissionID": sid,
+            "PlacementStatus": "unassigned",
+            "SessionId": "",
+            "TalkIndex": "",
+            "OverflowOrder": "",
+            "UpdatedAt": now,
+        }
+        write_paper_placements(placements.values(), paper_placements_path)
+
+    return {"ok": True, "submission_id": sid}
 
 
 def classify_papers(
     papers: List[Paper],
     classification_overrides: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> None:
-    overrides = classification_overrides or {}
-
-    for paper in papers:
-        text = normalize_key(f"{paper.title} {paper.abstract}")
-        tags = map_source_themes(paper.source_themes)
-        inferred_primary = infer_theme_from_text(text)
-
-        if tags:
-            primary = tags[0]
-            secondary = list(dict.fromkeys(tags[1:]))[:2]
-            source_hint = "source theme"
-
-            # Let abstract/title evidence surface mobility and land themes
-            # even when source tags are broad.
-            override_candidates = {"Income and wealth mobility", "Land inequality"}
-            if inferred_primary in override_candidates and inferred_primary != primary:
-                inferred_hits = keyword_matches(text, THEME_KEYWORDS.get(inferred_primary, []))
-                if len(inferred_hits) >= 2:
-                    secondary = list(dict.fromkeys([primary] + secondary))[:2]
-                    primary = inferred_primary
-                    source_hint = "title/abstract override"
-        else:
-            primary = inferred_primary
-            secondary = []
-            source_hint = "title/abstract inference"
-
-        subtheme, matched_keywords = classify_subtheme(primary, text)
-
-        paper.primary_theme = primary
-        paper.detailed_subtheme = subtheme
-        paper.secondary_tags = secondary
-        paper.matched_keywords = matched_keywords
-        paper.rationale = (
-            f"Mapped via {source_hint} to '{primary}' and grouped under '{subtheme}'."
-        )
-        paper.reviewed = False
-        paper.override_notes = ""
-
-        override = overrides.get(paper.submission_id)
-        if not override:
-            continue
-
-        override_theme = override.get("OverridePrimaryTheme", "")
-        override_subtheme = override.get("OverrideSubtheme", "")
-        reviewed = parse_bool(override.get("Reviewed", ""))
-        notes = override.get("OverrideNotes", "")
-
-        if override_theme:
-            paper.primary_theme = override_theme
-            if paper.primary_theme not in paper.secondary_tags and paper.primary_theme != primary:
-                paper.secondary_tags = list(dict.fromkeys([primary] + paper.secondary_tags))[:2]
-
-        if override_subtheme:
-            paper.detailed_subtheme = override_subtheme
-        elif override_theme and override_theme != primary:
-            paper.detailed_subtheme = classify_subtheme(paper.primary_theme, text)[0]
-
-        if override_theme or override_subtheme:
-            paper.rationale = "Mapped by manual override in curation UI."
-
-        paper.reviewed = reviewed
-        paper.override_notes = notes
+    classify_papers_core(
+        papers,
+        classification_overrides,
+        normalize_key=normalize_key,
+        map_source_themes=map_source_themes,
+        infer_theme_from_text=infer_theme_from_text,
+        classify_subtheme=classify_subtheme,
+        keyword_matches=keyword_matches,
+        theme_keywords=THEME_KEYWORDS,
+        parse_bool=parse_bool,
+    )
 
 
 def build_packed_groups(papers: List[Paper]) -> List[PackedGroup]:
@@ -1031,13 +1777,19 @@ def assign_groups_to_slots(
                 session_title = session_name_overrides[session_code]
 
             session = Session(
+                session_id=str(uuid.uuid5(uuid.NAMESPACE_DNS, f"session:{session_code}")),
                 session_code=session_code,
+                status="active",
                 day_label=slot.day_label,
                 day_num=slot.day_num,
                 time=slot.time,
                 block_label=slot.block_label,
                 block_num=slot.block_num,
                 room=slot.room,
+                start_min=parse_start_minutes(slot.time),
+                end_min=parse_end_minutes(slot.time, default_duration=90),
+                capacity=4,
+                source="template",
                 session_title=session_title,
                 primary_theme=chosen.dominant_primary,
                 subtheme=chosen.dominant_subtheme,
@@ -1061,12 +1813,165 @@ def assign_groups_to_slots(
     return sessions
 
 
-def _parse_positive_int(raw: str, default: int = 0) -> int:
+def _default_session_code(day_num: int, block_num: int, room: str) -> str:
+    return f"D{day_num}-B{block_num}-{room}"
+
+
+def _session_row_to_session(row: Dict[str, str], title_overrides: Dict[str, str]) -> Session:
+    session_id = str(row.get("SessionId", "")).strip() or str(uuid.uuid4())
+    day_label = str(row.get("DayLabel", "")).strip()
+    day_num = _parse_positive_int(row.get("DayNum", ""), default=DAY_TO_NUM.get(day_label, 0))
+    block_label = str(row.get("BlockLabel", "")).strip()
+    block_num = _parse_positive_int(row.get("BlockNum", ""), default=0)
+    time_label = str(row.get("TimeLabel", "")).strip()
+    start_min = _parse_positive_int(row.get("StartMin", ""), default=parse_start_minutes(time_label))
+    end_min = _parse_positive_int(row.get("EndMin", ""), default=parse_end_minutes(time_label, default_duration=90))
+    if end_min <= start_min:
+        end_min = start_min + 90
+    room = str(row.get("Room", "")).strip()
+    session_code = str(row.get("SessionCode", "")).strip() or _default_session_code(day_num, block_num, room)
+    status = str(row.get("Status", "active")).strip().lower()
+    if status not in {"active", "inactive"}:
+        status = "active"
+    capacity = _parse_positive_int(row.get("Capacity", ""), default=ACTIVE_CONFERENCE_CONFIG.structure.default_session_capacity)
+    source = str(row.get("Source", "")).strip() or "manual"
+
+    default_title = f"{session_code} Session"
+    session_title = title_overrides.get(session_code, default_title)
+
+    return Session(
+        session_id=session_id,
+        session_code=session_code,
+        status=status,
+        day_label=day_label,
+        day_num=day_num,
+        time=time_label,
+        block_label=block_label,
+        block_num=block_num,
+        room=room,
+        start_min=start_min,
+        end_min=end_min,
+        capacity=capacity,
+        source=source,
+        session_title=session_title,
+        primary_theme="General",
+        subtheme="General",
+        papers=[None] * capacity,
+    )
+
+
+def seed_session_structure_from_slots(
+    slots: List[Slot],
+    path: Path = SESSION_STRUCTURE_FILE,
+    default_capacity: int = 4,
+) -> Dict[str, Dict[str, str]]:
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    rows: List[Dict[str, str]] = []
+    for slot in slots:
+        session_code = slot.session_code
+        session_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"session:{session_code}"))
+        start_min = parse_start_minutes(slot.time)
+        end_min = parse_end_minutes(slot.time, default_duration=90)
+        rows.append(
+            {
+                "SessionId": session_id,
+                "SessionCode": session_code,
+                "Status": "active",
+                "DayLabel": slot.day_label,
+                "DayNum": str(slot.day_num),
+                "BlockLabel": slot.block_label,
+                "BlockNum": str(slot.block_num),
+                "TimeLabel": slot.time,
+                "StartMin": str(start_min),
+                "EndMin": str(end_min),
+                "Room": slot.room,
+                "Capacity": str(default_capacity),
+                "Source": "template",
+                "UpdatedAt": now,
+            }
+        )
+    write_session_structure_rows(rows, path)
+    return load_session_structure_rows(path)
+
+
+def _backup_legacy_layout_file(path: Path = PROGRAMME_LAYOUT_OVERRIDES_FILE) -> Optional[Path]:
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+    stamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    backup_path = path.with_suffix(path.suffix + f".bak.{stamp}")
+    shutil.copy2(path, backup_path)
+    return backup_path
+
+
+def _derive_initial_paper_placements(
+    papers: List[Paper],
+    slots: List[Slot],
+    session_rows: Dict[str, Dict[str, str]],
+    session_name_overrides: Dict[str, str],
+    legacy_layout_overrides: Dict[str, Dict[str, str]],
+) -> Dict[str, Dict[str, str]]:
+    out: Dict[str, Dict[str, str]] = {}
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    for paper in papers:
+        out[paper.submission_id] = {
+            "SubmissionID": paper.submission_id,
+            "PlacementStatus": "unassigned",
+            "SessionId": "",
+            "TalkIndex": "",
+            "OverflowOrder": "",
+            "UpdatedAt": now,
+        }
+
+    if not papers or not slots:
+        return out
+
     try:
-        value = int(str(raw).strip())
-        return value if value > 0 else default
+        groups = build_packed_groups(list(papers))
     except Exception:
-        return default
+        return out
+    if len(groups) != len(slots):
+        return out
+
+    baseline_sessions = assign_groups_to_slots(groups, slots, session_name_overrides)
+    apply_programme_layout_overrides_core(papers, baseline_sessions, legacy_layout_overrides)
+    code_to_id = {
+        str(row.get("SessionCode", "")).strip(): str(row.get("SessionId", "")).strip()
+        for row in session_rows.values()
+    }
+
+    for paper in papers:
+        session_id = code_to_id.get(str(paper.session_code).strip(), "")
+        status = str(paper.placement_status or "unassigned").strip().lower()
+        if status in {"scheduled", "overflow"} and not session_id:
+            status = "unassigned"
+        out[paper.submission_id] = {
+            "SubmissionID": paper.submission_id,
+            "PlacementStatus": status,
+            "SessionId": session_id if status in {"scheduled", "overflow"} else "",
+            "TalkIndex": str(paper.talk_index) if status == "scheduled" and paper.talk_index else "",
+            "OverflowOrder": str(paper.overflow_order) if status == "overflow" and paper.overflow_order else "",
+            "UpdatedAt": now,
+        }
+
+    return out
+
+
+def _refresh_session_theme_metadata(sessions: List[Session]) -> None:
+    for session in sessions:
+        non_null = [paper for paper in session.papers if paper is not None]
+        non_null.extend(list(session.overflow_papers))
+        if not non_null:
+            session.primary_theme = "General"
+            session.subtheme = "General"
+            if not session.session_title.strip():
+                session.session_title = f"{session.session_code} Session"
+            continue
+        primary_counts = Counter([paper.primary_theme for paper in non_null if paper.primary_theme])
+        subtheme_counts = Counter([paper.detailed_subtheme for paper in non_null if paper.detailed_subtheme])
+        session.primary_theme = primary_counts.most_common(1)[0][0] if primary_counts else "General"
+        session.subtheme = subtheme_counts.most_common(1)[0][0] if subtheme_counts else "General"
+        if not session.session_title.strip() or session.session_title == f"{session.session_code} Session":
+            session.session_title = f"{THEME_SHORT.get(session.primary_theme, session.primary_theme)}: {session.subtheme}"
 
 
 def apply_programme_layout_overrides(
@@ -1074,283 +1979,129 @@ def apply_programme_layout_overrides(
     sessions: List[Session],
     overrides: Dict[str, Dict[str, str]],
 ) -> Tuple[List[Paper], List[Dict[str, str]]]:
-    paper_map = {p.submission_id: p for p in papers}
-    session_map = {s.session_code: s for s in sessions}
-
-    slot_map: Dict[Tuple[str, int], Optional[str]] = {}
-    paper_place: Dict[str, Tuple[str, str, int]] = {}
-    overflow_map: Dict[str, List[Tuple[int, str]]] = defaultdict(list)
-    unassigned_ids: set[str] = set()
-    slot_conflicts: List[Dict[str, str]] = []
-
-    for session in sessions:
-        session.overflow_papers = []
-        for idx in range(1, 5):
-            paper = session.papers[idx - 1]
-            sid = None if paper is None else paper.submission_id
-            slot_map[(session.session_code, idx)] = sid
-            if sid:
-                paper_place[sid] = ("scheduled", session.session_code, idx)
-
-    def detach(sid: str) -> None:
-        current = paper_place.get(sid)
-        if not current:
-            return
-        status, session_code, position = current
-        if status == "scheduled":
-            slot_map[(session_code, position)] = None
-        elif status == "overflow":
-            overflow_map[session_code] = [
-                (o, existing_sid)
-                for o, existing_sid in overflow_map.get(session_code, [])
-                if existing_sid != sid
-            ]
-        elif status == "unassigned":
-            unassigned_ids.discard(sid)
-        paper_place.pop(sid, None)
-
-    for sid, row in overrides.items():
-        if sid not in paper_map:
-            continue
-
-        status = str(row.get("PlacementStatus", "")).strip().lower()
-        target_session = str(row.get("SessionCode", "")).strip()
-        talk_index = _parse_positive_int(row.get("TalkIndex", ""), default=0)
-        overflow_order = _parse_positive_int(row.get("OverflowOrder", ""), default=9999)
-
-        detach(sid)
-
-        if status == "unassigned":
-            unassigned_ids.add(sid)
-            paper_place[sid] = ("unassigned", "", 0)
-            continue
-
-        if status == "scheduled":
-            if target_session not in session_map or talk_index not in {1, 2, 3, 4}:
-                unassigned_ids.add(sid)
-                paper_place[sid] = ("unassigned", "", 0)
-                continue
-            key = (target_session, talk_index)
-            occupant_sid = slot_map.get(key)
-            if occupant_sid is None:
-                slot_map[key] = sid
-                paper_place[sid] = ("scheduled", target_session, talk_index)
-            else:
-                # Session slot already occupied: keep existing scheduled paper and
-                # send moved paper to overflow for organizer resolution.
-                overflow_map[target_session].append((overflow_order, sid))
-                paper_place[sid] = ("overflow", target_session, overflow_order)
-                slot_conflicts.append(
-                    {
-                        "SubmissionID": sid,
-                        "SessionCode": target_session,
-                        "TalkIndex": str(talk_index),
-                        "Reason": f"Target slot occupied by {occupant_sid}; moved to overflow.",
-                    }
-                )
-            continue
-
-        if status == "overflow":
-            if target_session not in session_map:
-                unassigned_ids.add(sid)
-                paper_place[sid] = ("unassigned", "", 0)
-                continue
-            overflow_map[target_session].append((overflow_order, sid))
-            paper_place[sid] = ("overflow", target_session, overflow_order)
-            continue
-
-        # Unknown status fallback.
-        unassigned_ids.add(sid)
-        paper_place[sid] = ("unassigned", "", 0)
-
-    # Rebuild sessions and paper placement fields.
-    for session in sessions:
-        rebuilt_slots: List[Optional[Paper]] = []
-        for idx in range(1, 5):
-            sid = slot_map.get((session.session_code, idx))
-            paper = paper_map.get(sid) if sid else None
-            rebuilt_slots.append(paper)
-            if paper is not None:
-                paper.placement_status = "scheduled"
-                paper.session_code = session.session_code
-                paper.session_title = session.session_title
-                paper.day_label = session.day_label
-                paper.day_num = session.day_num
-                paper.block_label = session.block_label
-                paper.block_num = session.block_num
-                paper.time = session.time
-                paper.room = session.room
-                paper.talk_index = idx
-                paper.overflow_order = 0
-        session.papers = rebuilt_slots
-
-        ordered_overflow = sorted(
-            overflow_map.get(session.session_code, []),
-            key=lambda x: (x[0], paper_map[x[1]].title.lower()),
-        )
-        session.overflow_papers = []
-        for rank, (_, sid) in enumerate(ordered_overflow, start=1):
-            paper = paper_map[sid]
-            paper.placement_status = "overflow"
-            paper.session_code = session.session_code
-            paper.session_title = session.session_title
-            paper.day_label = session.day_label
-            paper.day_num = session.day_num
-            paper.block_label = session.block_label
-            paper.block_num = session.block_num
-            paper.time = session.time
-            paper.room = session.room
-            paper.talk_index = 0
-            paper.overflow_order = rank
-            session.overflow_papers.append(paper)
-
-    for sid in unassigned_ids:
-        paper = paper_map[sid]
-        paper.placement_status = "unassigned"
-        paper.session_code = ""
-        paper.session_title = ""
-        paper.day_label = ""
-        paper.day_num = 0
-        paper.block_label = ""
-        paper.block_num = 0
-        paper.time = ""
-        paper.room = ""
-        paper.talk_index = 0
-        paper.overflow_order = 0
-
-    # Any paper not explicitly set remains in scheduled default state.
-    for paper in papers:
-        if paper.submission_id in unassigned_ids:
-            continue
-        if paper.placement_status == "overflow":
-            continue
-        if paper.session_code:
-            paper.placement_status = "scheduled"
-
-    unassigned_papers = sorted(
-        [paper_map[sid] for sid in unassigned_ids if sid in paper_map],
-        key=lambda p: p.title.lower(),
-    )
-    return unassigned_papers, slot_conflicts
+    return apply_programme_layout_overrides_core(papers, sessions, overrides)
 
 
-def validate_programme_state(state: ProgrammeState) -> Dict[str, object]:
-    papers = state.papers
-    sessions = state.sessions
-
-    scheduled_ids: List[str] = []
-    overflow_ids: List[str] = []
-    overflow_by_session: Dict[str, List[str]] = {}
-    for session in sessions:
-        if len(session.papers) != 4:
-            raise RuntimeError(f"Session {session.session_code} does not have 4 slots")
-        for paper in session.papers:
-            if paper is not None:
-                scheduled_ids.append(paper.submission_id)
-        if session.overflow_papers:
-            overflow_by_session[session.session_code] = [p.submission_id for p in session.overflow_papers]
-            overflow_ids.extend(overflow_by_session[session.session_code])
-
-    unassigned_ids = [paper.submission_id for paper in state.unassigned_papers]
-    accounted_ids = scheduled_ids + overflow_ids + unassigned_ids
-    id_counts = Counter(accounted_ids)
-    duplicates = sorted([sid for sid, count in id_counts.items() if count > 1])
-
-    all_ids = sorted([p.submission_id for p in papers])
-    assigned_set = set(accounted_ids)
-    missing = sorted([sid for sid in all_ids if sid not in assigned_set])
-
-    reserve_slots = sum(1 for session in sessions for paper in session.papers if paper is None)
-    day1_opening_assigned = [
-        session.session_code
-        for session in sessions
-        if session.day_num == 1 and session.time.strip() == "9h30-10h"
-    ]
-    optional_block_sessions = [
-        session.session_code for session in sessions if "OPTIONAL" in session.block_label.upper()
-    ]
-
-    reviewed_count = sum(1 for p in papers if p.reviewed)
-    over_capacity_sessions = sorted([code for code, values in overflow_by_session.items() if values])
-
-    validations = {
-        "accepted_papers": len(papers),
-        "sessions": len(sessions),
-        "assigned_papers": len(scheduled_ids),
-        "scheduled_papers": len(scheduled_ids),
-        "overflow_papers": len(overflow_ids),
-        "unassigned_papers": len(unassigned_ids),
-        "accounted_papers": len(accounted_ids),
-        "duplicate_submission_ids": duplicates,
-        "missing_submission_ids": missing,
-        "unassigned_submission_ids": sorted(unassigned_ids),
-        "overflow_submission_ids": sorted(overflow_ids),
-        "overflow_by_session": overflow_by_session,
-        "over_capacity_sessions": over_capacity_sessions,
-        "slot_conflicts": list(state.slot_conflicts),
-        "reserve_slots": reserve_slots,
-        "day1_opening_assigned_sessions": day1_opening_assigned,
-        "optional_block_assigned_sessions": optional_block_sessions,
-        "reviewed_papers": reviewed_count,
-        "unreviewed_papers": len(papers) - reviewed_count,
-    }
-
-    hard_constraints_ok = (
-        len(sessions) == 75
-        and len(day1_opening_assigned) == 0
-        and len(optional_block_sessions) == 0
-    )
-    planning_issues_present = (
-        len(duplicates) == 0
-        and len(missing) == 0
-        and reserve_slots == 3
-        and len(unassigned_ids) == 0
-        and len(overflow_ids) == 0
-        and len(state.slot_conflicts) == 0
-    )
-    validations["hard_constraints_ok"] = hard_constraints_ok
-    validations["is_valid"] = hard_constraints_ok and planning_issues_present
-    validations["has_planning_issues"] = not planning_issues_present
-
-    return validations
+def validate_programme_state(
+    state: ProgrammeState,
+    config: ConferenceConfig = ACTIVE_CONFERENCE_CONFIG,
+) -> Dict[str, object]:
+    return validate_programme_state_core(state, config)
 
 
 def build_programme_state(
-    submissions_path: Path = Path(SUBMISSIONS_FILE),
-    programme_path: Path = Path(PROGRAMME_FILE),
+    submissions_path: Optional[Path] = None,
+    programme_path: Optional[Path] = None,
     classification_overrides_path: Path = CLASSIFICATION_OVERRIDES_FILE,
     session_name_overrides_path: Path = SESSION_NAME_OVERRIDES_FILE,
     programme_layout_overrides_path: Path = PROGRAMME_LAYOUT_OVERRIDES_FILE,
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    paper_placements_path: Path = PAPER_PLACEMENTS_FILE,
+    manual_talks_path: Path = MANUAL_TALKS_FILE,
+    config_path: Optional[Path] = None,
 ) -> ProgrammeState:
+    conference_config = load_conference_config(config_path)
+    _hydrate_runtime_constants(conference_config)
+    resolved_submissions_path = Path(
+        submissions_path or (SOURCE_DIR / conference_config.files.get("submissions", Path(SUBMISSIONS_FILE).name))
+    )
+    resolved_programme_path = Path(
+        programme_path or (SOURCE_DIR / conference_config.files.get("programme", Path(PROGRAMME_FILE).name))
+    )
+
     ensure_state_files(
         STATE_DIR,
         classification_overrides_path,
         session_name_overrides_path,
         programme_layout_overrides_path,
+        session_structure_path,
+        paper_placements_path,
+        manual_talks_path,
     )
 
-    papers = parse_submissions(submissions_path)
+    cache_key = _base_cache_key(resolved_submissions_path, resolved_programme_path, conference_config)
+    cached_base = _BASE_PARSE_CACHE.get(cache_key)
+    if cached_base is None:
+        parsed_papers = parse_submissions(resolved_submissions_path, conference_config)
+        parsed_slots = parse_programme_slots(resolved_programme_path, conference_config)
+        _BASE_PARSE_CACHE[cache_key] = (parsed_papers, parsed_slots)
+        if len(_BASE_PARSE_CACHE) > 4:
+            _BASE_PARSE_CACHE.pop(next(iter(_BASE_PARSE_CACHE)))
+        cached_base = _BASE_PARSE_CACHE[cache_key]
+
+    papers = copy.deepcopy(cached_base[0])
+    slots = copy.deepcopy(cached_base[1])
+    manual_papers = load_manual_talks(manual_talks_path)
+    known_ids = {paper.submission_id for paper in papers}
+    for paper in manual_papers:
+        sid = paper.submission_id
+        if sid in known_ids or not sid:
+            sid = f"MANUAL-{uuid.uuid4().hex[:8].upper()}"
+            paper.submission_id = sid
+        known_ids.add(sid)
+        papers.append(paper)
+
     class_overrides = load_classification_overrides(classification_overrides_path)
     classify_papers(papers, class_overrides)
-
-    slots = parse_programme_slots(programme_path)
-    if len(slots) != 75:
-        raise RuntimeError(f"Expected 75 slots from programme template, found {len(slots)}")
-
-    groups = build_packed_groups(papers)
     session_name_overrides = load_session_name_overrides(session_name_overrides_path)
-    sessions = assign_groups_to_slots(groups, slots, session_name_overrides)
-    layout_overrides = load_programme_layout_overrides(programme_layout_overrides_path)
-    unassigned_papers, slot_conflicts = apply_programme_layout_overrides(papers, sessions, layout_overrides)
+
+    session_rows = load_session_structure_rows(session_structure_path)
+    if not session_rows and slots:
+        session_rows = seed_session_structure_from_slots(
+            slots,
+            session_structure_path,
+            default_capacity=conference_config.structure.default_session_capacity,
+        )
+
+    placements = load_paper_placements(paper_placements_path)
+    legacy_rows = _load_csv_rows(programme_layout_overrides_path, PROGRAMME_LAYOUT_HEADERS)
+    if not placements:
+        initial_placements = _derive_initial_paper_placements(
+            copy.deepcopy(papers),
+            slots,
+            session_rows,
+            session_name_overrides,
+            {row.get("SubmissionID", ""): row for row in legacy_rows if row.get("SubmissionID", "")},
+        )
+        write_paper_placements(initial_placements.values(), paper_placements_path)
+        placements = load_paper_placements(paper_placements_path)
+        if legacy_rows:
+            _backup_legacy_layout_file(programme_layout_overrides_path)
+
+    all_sessions = sorted(
+        [_session_row_to_session(row, session_name_overrides) for row in session_rows.values()],
+        key=lambda s: (s.day_num, s.start_min, room_sort_key(s.room), s.session_code),
+    )
+    active_sessions = [session for session in all_sessions if session.status == "active"]
+    inactive_sessions = [session for session in all_sessions if session.status != "active"]
+
+    unassigned_papers, slot_conflicts = apply_paper_placements_core(papers, active_sessions, placements)
+    _refresh_session_theme_metadata(active_sessions)
+    for session in all_sessions:
+        if session.session_code in session_name_overrides:
+            session.session_title = session_name_overrides[session.session_code]
+
+    layout_overrides = load_programme_layout_overrides(
+        programme_layout_overrides_path,
+        paper_placements_path=paper_placements_path,
+        session_structure_path=session_structure_path,
+    )
+    edited_submission_ids = _compute_edited_submission_ids(class_overrides, layout_overrides)
 
     state = ProgrammeState(
         papers=papers,
-        sessions=sessions,
+        sessions=active_sessions,
+        inactive_sessions=inactive_sessions,
+        all_sessions=all_sessions,
         validations={},
         unassigned_papers=unassigned_papers,
         slot_conflicts=slot_conflicts,
+        edited_submission_ids=edited_submission_ids,
     )
-    state.validations = validate_programme_state(state)
+    state.validations = validate_programme_state(state, conference_config)
+    state.validations["edited_submission_ids"] = sorted(edited_submission_ids)
+    state.validations["conference_config"] = resolve_config_path(config_path).as_posix()
+    state.validations["conference_signature"] = conference_config.signature()
     return state
 
 
@@ -1390,15 +2141,18 @@ def papers_to_rows(state: ProgrammeState) -> List[Dict[str, object]]:
 def sessions_to_rows(state: ProgrammeState) -> List[Dict[str, object]]:
     rows: List[Dict[str, object]] = []
     for session in sorted(
-        state.sessions,
-        key=lambda s: (s.day_num, parse_start_minutes(s.time), room_sort_key(s.room)),
+        state.all_sessions,
+        key=lambda s: (s.day_num, s.start_min, room_sort_key(s.room)),
     ):
         row: Dict[str, object] = {
+            "SessionId": session.session_id,
             "SessionCode": session.session_code,
+            "Status": session.status,
             "Day": session.day_label,
             "Block": session.block_label,
             "Time": session.time,
             "Room": session.room,
+            "Capacity": session.capacity,
             "SessionTitle": session.session_title,
             "PrimaryTheme": session.primary_theme,
             "Subtheme": session.subtheme,

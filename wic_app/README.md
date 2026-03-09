@@ -54,6 +54,21 @@ Draft + publish outputs:
 python3 wic_app/generate_wic_programme_draft.py --publish
 ```
 
+Using a custom conference profile:
+
+```bash
+python3 wic_app/generate_wic_programme_draft.py --config /path/to/conference.json --publish
+```
+
+For the Streamlit app, set the same config path with:
+
+```bash
+export WIC_CONFERENCE_CONFIG=/path/to/conference.json
+streamlit run wic_app/app.py
+```
+
+The default profile is stored at `wic_app/assets/conference.default.json`.
+
 ## Optional branding
 
 Create `wic_app/assets/branding.json` (see `wic_app/assets/branding.example.json`) to override:

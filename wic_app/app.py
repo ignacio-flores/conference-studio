@@ -2,49 +2,68 @@ from __future__ import annotations
 
 from datetime import datetime
 import html
+import os
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
 
+from engine.config import load_conference_config
+from engine.scheduling import build_equal_time_ranges
 from exporters.publish import export_draft_workbook, export_publish_excel, export_publish_pdf
 from reclassification_engine import (
     CLASSIFICATION_OVERRIDES_FILE,
-    PROGRAMME_FILE,
+    MANUAL_TALKS_FILE,
+    PAPER_PLACEMENTS_FILE,
     PROGRAMME_LAYOUT_OVERRIDES_FILE,
+    SESSION_STRUCTURE_FILE,
     SESSION_NAME_OVERRIDES_FILE,
-    SUBMISSIONS_FILE,
     THEME_ORDER,
+    add_room_session,
     build_programme_state,
+    clear_session,
+    create_manual_talk,
+    create_session,
     format_minutes,
+    load_manual_talks,
     load_classification_overrides,
+    load_paper_placements,
     load_programme_layout_overrides,
+    load_session_structure_rows,
     load_session_name_overrides,
+    parse_end_minutes,
     parse_start_minutes,
     papers_to_rows,
     programme_talk_rows,
+    remove_session,
+    restore_session,
     room_sort_key,
     sessions_to_rows,
+    update_session_structure_row,
+    validate_session_structure_rows,
     write_classification_overrides,
+    write_manual_talks,
+    write_paper_placements,
     write_programme_layout_overrides,
+    write_session_structure_rows,
     write_session_name_overrides,
 )
-
-try:
-    from streamlit_sortables import sort_items as sortable_items
-except Exception:
-    sortable_items = None
-
+from ui.actions import render_top_actions
+from ui.papers import render_paper_list_tab
+from ui.programme import render_programme_tab as render_programme_tab_view
+from ui.sessions import render_session_names_tab
 
 NOTE_SPLIT_RE = re.compile(r"note\s*to\s*conference\s*organizers", re.IGNORECASE)
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 WHITESPACE_RE = re.compile(r"\s+")
-DRAG_ITEM_SEP = " || "
+
+APP_CONFERENCE_CONFIG = load_conference_config()
+APP_TITLE = f"{APP_CONFERENCE_CONFIG.conference_title} Reclassification Studio"
 
 
-st.set_page_config(page_title="WIC 2026 Reclassification Studio", layout="wide")
+st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.markdown(
     """
 <style>
@@ -88,25 +107,30 @@ def _preview_abstract(value: object) -> str:
     return clean.strip()
 
 
-def _paper_drag_label(submission_id: str, title: str) -> str:
-    compact_title = _clean_display_text(title)
-    if len(compact_title) > 120:
-        compact_title = f"{compact_title[:117]}..."
-    return f"{submission_id}{DRAG_ITEM_SEP}{compact_title}"
-
-
-def _sid_from_drag_label(label: str) -> str:
-    return _normalize_text(str(label).split(DRAG_ITEM_SEP, 1)[0])
+def _app_config_path() -> Optional[Path]:
+    config_env = os.environ.get("WIC_CONFERENCE_CONFIG", "").strip()
+    return Path(config_env) if config_env else None
 
 
 def _load_state():
+    config_path = _app_config_path()
     return build_programme_state(
-        submissions_path=Path(SUBMISSIONS_FILE),
-        programme_path=Path(PROGRAMME_FILE),
         classification_overrides_path=CLASSIFICATION_OVERRIDES_FILE,
         session_name_overrides_path=SESSION_NAME_OVERRIDES_FILE,
         programme_layout_overrides_path=PROGRAMME_LAYOUT_OVERRIDES_FILE,
+        config_path=config_path,
     )
+
+
+def _read_state_file(path: Path) -> str:
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
+def _write_state_file(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
 
 
 def _init_session_state() -> None:
@@ -118,36 +142,17 @@ def _init_session_state() -> None:
         st.session_state.flash_message = ""
 
 
-def _edited_submission_ids() -> Set[str]:
-    edited: Set[str] = set()
-
-    class_overrides = load_classification_overrides(CLASSIFICATION_OVERRIDES_FILE)
-    for sid, row in class_overrides.items():
-        if (
-            _normalize_text(row.get("OverridePrimaryTheme", ""))
-            or _normalize_text(row.get("OverrideSubtheme", ""))
-            or _normalize_text(row.get("OverrideNotes", ""))
-            or _normalize_text(row.get("Reviewed", "")).lower() in {"true", "1", "yes", "y"}
-        ):
-            edited.add(sid)
-
-    layout_overrides = load_programme_layout_overrides(PROGRAMME_LAYOUT_OVERRIDES_FILE)
-    for sid, row in layout_overrides.items():
-        status = _normalize_text(row.get("PlacementStatus", "")).lower()
-        session_code = _normalize_text(row.get("SessionCode", ""))
-        talk_index = _normalize_text(row.get("TalkIndex", ""))
-        overflow_order = _normalize_text(row.get("OverflowOrder", ""))
-        if status in {"unassigned", "overflow"} or session_code or talk_index or overflow_order:
-            edited.add(sid)
-
-    return edited
-
-
 def _snapshot_for_undo() -> Dict[str, object]:
+    tracked_files = [
+        CLASSIFICATION_OVERRIDES_FILE,
+        SESSION_NAME_OVERRIDES_FILE,
+        PROGRAMME_LAYOUT_OVERRIDES_FILE,
+        SESSION_STRUCTURE_FILE,
+        PAPER_PLACEMENTS_FILE,
+        MANUAL_TALKS_FILE,
+    ]
     return {
-        "classification": load_classification_overrides(CLASSIFICATION_OVERRIDES_FILE),
-        "session_titles": load_session_name_overrides(SESSION_NAME_OVERRIDES_FILE),
-        "layout": load_programme_layout_overrides(PROGRAMME_LAYOUT_OVERRIDES_FILE),
+        "files": {str(path): _read_state_file(path) for path in tracked_files},
         "timestamp": datetime.utcnow().isoformat(timespec="seconds"),
     }
 
@@ -163,12 +168,12 @@ def _normalize_layout_override_row(row: Dict[str, object], now: str) -> Dict[str
     if status not in {"scheduled", "unassigned", "overflow"}:
         status = "scheduled"
 
-    session_code = _normalize_text(row.get("SessionCode", ""))
+    session_id = _normalize_text(row.get("SessionId", ""))
     talk_index = _normalize_text(row.get("TalkIndex", ""))
     overflow_order = _normalize_text(row.get("OverflowOrder", ""))
 
     if status == "unassigned":
-        session_code = ""
+        session_id = ""
         talk_index = ""
         overflow_order = ""
     elif status == "scheduled":
@@ -179,7 +184,7 @@ def _normalize_layout_override_row(row: Dict[str, object], now: str) -> Dict[str
     return {
         "SubmissionID": _normalize_text(row.get("SubmissionID", "")),
         "PlacementStatus": status,
-        "SessionCode": session_code,
+        "SessionId": session_id,
         "TalkIndex": talk_index,
         "OverflowOrder": overflow_order,
         "UpdatedAt": _normalize_text(row.get("UpdatedAt", "")) or now,
@@ -303,12 +308,96 @@ def _apply_session_name_edits_if_changed(edited_df: pd.DataFrame) -> bool:
     return True
 
 
+def _normalize_int_string(value: object, default: int) -> str:
+    try:
+        text = str(value).strip()
+        if not text:
+            return str(default)
+        parsed = int(float(text))
+        return str(parsed)
+    except Exception:
+        return str(default)
+
+
+def _apply_session_structure_edits_if_changed(edited_df: pd.DataFrame) -> bool:
+    if edited_df.empty:
+        return False
+
+    config = load_conference_config(_app_config_path())
+    current_rows = load_session_structure_rows(SESSION_STRUCTURE_FILE)
+    merged: Dict[str, Dict[str, str]] = {sid: dict(row) for sid, row in current_rows.items()}
+    changed = False
+
+    for _, row in edited_df.iterrows():
+        session_id = _normalize_text(row.get("SessionId", ""))
+        if not session_id or session_id not in merged:
+            continue
+
+        current = merged[session_id]
+        candidate = dict(current)
+        candidate["SessionCode"] = _normalize_text(row.get("SessionCode", current.get("SessionCode", "")))
+        status = _normalize_text(row.get("Status", current.get("Status", "active"))).lower()
+        candidate["Status"] = status if status in {"active", "inactive"} else current.get("Status", "active")
+        candidate["DayLabel"] = _normalize_text(row.get("DayLabel", current.get("DayLabel", "")))
+        day_default = config.day_to_num.get(candidate["DayLabel"], int(current.get("DayNum", "0") or 0))
+        candidate["DayNum"] = _normalize_int_string(row.get("DayNum", current.get("DayNum", "")), day_default)
+        candidate["BlockLabel"] = _normalize_text(row.get("BlockLabel", current.get("BlockLabel", "")))
+
+        block_text = _normalize_text(row.get("BlockNum", current.get("BlockNum", "")))
+        if not block_text:
+            block_match = re.search(r"(\d+)", candidate["BlockLabel"])
+            block_default = int(block_match.group(1)) if block_match else int(current.get("BlockNum", "0") or 0)
+            candidate["BlockNum"] = str(block_default)
+        else:
+            candidate["BlockNum"] = _normalize_int_string(block_text, int(current.get("BlockNum", "0") or 0))
+
+        candidate["TimeLabel"] = _normalize_text(row.get("TimeLabel", current.get("TimeLabel", "")))
+        start_default = parse_start_minutes(candidate["TimeLabel"])
+        end_default = parse_end_minutes(candidate["TimeLabel"], default_duration=90)
+        candidate["StartMin"] = _normalize_int_string(row.get("StartMin", current.get("StartMin", "")), start_default)
+        candidate["EndMin"] = _normalize_int_string(row.get("EndMin", current.get("EndMin", "")), end_default)
+        if int(candidate["EndMin"]) <= int(candidate["StartMin"]):
+            candidate["EndMin"] = str(int(candidate["StartMin"]) + 90)
+
+        candidate["Room"] = _normalize_text(row.get("Room", current.get("Room", "")))
+        candidate["Capacity"] = _normalize_int_string(
+            row.get("Capacity", current.get("Capacity", "")),
+            config.structure.default_session_capacity,
+        )
+        if int(candidate["Capacity"]) <= 0:
+            candidate["Capacity"] = str(config.structure.default_session_capacity)
+        candidate["Source"] = _normalize_text(row.get("Source", current.get("Source", "manual"))) or "manual"
+
+        if any(candidate.get(k, "") != current.get(k, "") for k in candidate.keys()):
+            candidate["UpdatedAt"] = datetime.utcnow().isoformat(timespec="seconds")
+            merged[session_id] = candidate
+            changed = True
+
+    if not changed:
+        return False
+
+    errors = validate_session_structure_rows(merged.values(), config)
+    if errors:
+        st.error(errors[0])
+        return False
+
+    st.session_state.last_change = _snapshot_for_undo()
+    write_session_structure_rows(merged.values(), SESSION_STRUCTURE_FILE)
+    _refresh_state("Applied session structure changes.")
+    return True
+
+
 def _apply_layout_updates(update_rows: Dict[str, Dict[str, object]], message: str) -> bool:
     if not update_rows:
         return False
 
-    current_overrides = load_programme_layout_overrides(PROGRAMME_LAYOUT_OVERRIDES_FILE)
+    current_overrides = load_paper_placements(PAPER_PLACEMENTS_FILE)
     merged = dict(current_overrides)
+    state = st.session_state.wic_state
+    code_to_id = {
+        _normalize_text(session.session_code): _normalize_text(session.session_id)
+        for session in state.all_sessions
+    }
     now = datetime.utcnow().isoformat(timespec="seconds")
     changed = False
     snapshot: Optional[Dict[str, object]] = None
@@ -322,20 +411,28 @@ def _apply_layout_updates(update_rows: Dict[str, Dict[str, object]], message: st
             {
                 "SubmissionID": sid,
                 "PlacementStatus": row.get("PlacementStatus", "scheduled"),
-                "SessionCode": row.get("SessionCode", ""),
+                "SessionId": row.get("SessionId", ""),
                 "TalkIndex": row.get("TalkIndex", ""),
                 "OverflowOrder": row.get("OverflowOrder", ""),
                 "UpdatedAt": now,
             },
             now=now,
         )
+        if not normalized["SessionId"]:
+            maybe_code = _normalize_text(row.get("SessionCode", ""))
+            if maybe_code:
+                normalized["SessionId"] = code_to_id.get(maybe_code, "")
+        if normalized["PlacementStatus"] in {"scheduled", "overflow"} and not normalized["SessionId"]:
+            normalized["PlacementStatus"] = "unassigned"
+            normalized["TalkIndex"] = ""
+            normalized["OverflowOrder"] = ""
 
         existing_raw = current_overrides.get(sid, {})
         existing = _normalize_layout_override_row(
             {
                 "SubmissionID": sid,
                 "PlacementStatus": existing_raw.get("PlacementStatus", ""),
-                "SessionCode": existing_raw.get("SessionCode", ""),
+                "SessionId": existing_raw.get("SessionId", ""),
                 "TalkIndex": existing_raw.get("TalkIndex", ""),
                 "OverflowOrder": existing_raw.get("OverflowOrder", ""),
                 "UpdatedAt": existing_raw.get("UpdatedAt", ""),
@@ -345,7 +442,7 @@ def _apply_layout_updates(update_rows: Dict[str, Dict[str, object]], message: st
 
         if (
             normalized["PlacementStatus"] == existing["PlacementStatus"]
-            and normalized["SessionCode"] == existing["SessionCode"]
+            and normalized["SessionId"] == existing["SessionId"]
             and normalized["TalkIndex"] == existing["TalkIndex"]
             and normalized["OverflowOrder"] == existing["OverflowOrder"]
         ):
@@ -361,7 +458,7 @@ def _apply_layout_updates(update_rows: Dict[str, Dict[str, object]], message: st
         return False
 
     st.session_state.last_change = snapshot
-    write_programme_layout_overrides(merged.values(), PROGRAMME_LAYOUT_OVERRIDES_FILE)
+    write_paper_placements(merged.values(), PAPER_PLACEMENTS_FILE)
     _refresh_state(message)
     return True
 
@@ -371,17 +468,286 @@ def _undo_last_change() -> bool:
     if not last_change:
         return False
 
-    classification_snapshot = last_change.get("classification", {})
-    session_snapshot = last_change.get("session_titles", {})
-    layout_snapshot = last_change.get("layout", {})
-
-    write_classification_overrides(classification_snapshot.values(), CLASSIFICATION_OVERRIDES_FILE)
-    write_session_name_overrides(session_snapshot, SESSION_NAME_OVERRIDES_FILE)
-    write_programme_layout_overrides(layout_snapshot.values(), PROGRAMME_LAYOUT_OVERRIDES_FILE)
+    files_snapshot = last_change.get("files", {})
+    if not isinstance(files_snapshot, dict):
+        return False
+    for raw_path, content in files_snapshot.items():
+        _write_state_file(Path(raw_path), str(content))
 
     st.session_state.last_change = None
     _refresh_state("Undid last change.")
     return True
+
+
+def _render_structure_tab(state) -> None:
+    st.subheader("Structure")
+    config = load_conference_config(_app_config_path())
+    session_rows = list(load_session_structure_rows(SESSION_STRUCTURE_FILE).values())
+    session_rows = sorted(
+        session_rows,
+        key=lambda row: (
+            _normalize_text(row.get("Status", "active")),
+            int(str(row.get("DayNum", "0") or "0")),
+            int(str(row.get("StartMin", "0") or "0")),
+            room_sort_key(_normalize_text(row.get("Room", ""))),
+            _normalize_text(row.get("SessionCode", "")),
+        ),
+    )
+    structure_columns = [
+        "SessionId",
+        "SessionCode",
+        "Status",
+        "DayLabel",
+        "DayNum",
+        "BlockLabel",
+        "BlockNum",
+        "TimeLabel",
+        "StartMin",
+        "EndMin",
+        "Room",
+        "Capacity",
+        "Source",
+    ]
+    structure_df = pd.DataFrame(session_rows, columns=structure_columns)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Active sessions", len(state.sessions))
+    c2.metric("Inactive sessions", len(state.inactive_sessions))
+    c3.metric("Unassigned papers", len(state.unassigned_papers))
+    c4.metric("Manual talks", len([p for p in state.papers if _normalize_text(getattr(p, "source", "")) == "manual"]))
+
+    st.markdown("#### Session Structure Table")
+    if structure_df.empty:
+        st.info("No sessions yet. Create sessions below to start from scratch.")
+    else:
+        edited_structure = st.data_editor(
+            structure_df,
+            key="session_structure_editor",
+            hide_index=True,
+            use_container_width=True,
+            num_rows="fixed",
+            column_config={
+                "SessionId": st.column_config.TextColumn(disabled=True),
+                "SessionCode": st.column_config.TextColumn(),
+                "Status": st.column_config.SelectboxColumn(options=["active", "inactive"]),
+                "DayLabel": st.column_config.TextColumn(),
+                "DayNum": st.column_config.NumberColumn(format="%d"),
+                "BlockLabel": st.column_config.TextColumn(),
+                "BlockNum": st.column_config.NumberColumn(format="%d"),
+                "TimeLabel": st.column_config.TextColumn(),
+                "StartMin": st.column_config.NumberColumn(format="%d"),
+                "EndMin": st.column_config.NumberColumn(format="%d"),
+                "Room": st.column_config.TextColumn(),
+                "Capacity": st.column_config.NumberColumn(format="%d"),
+                "Source": st.column_config.TextColumn(),
+            },
+        )
+        if _apply_session_structure_edits_if_changed(edited_structure):
+            st.rerun()
+
+    st.markdown("#### Lifecycle Actions")
+    active_sessions = sorted(state.sessions, key=_session_sort_key)
+    inactive_sessions = sorted(state.inactive_sessions, key=_session_sort_key)
+
+    left, right = st.columns(2, gap="large")
+    with left:
+        st.caption("Active Session Actions")
+        active_ids = [session.session_id for session in active_sessions]
+        if active_ids:
+            active_pick = st.selectbox(
+                "Select active session",
+                active_ids,
+                format_func=lambda session_id: next(
+                    (
+                        f"{s.session_code} | {s.day_label} | {s.time} | {s.room} | cap {s.capacity}"
+                        for s in active_sessions
+                        if s.session_id == session_id
+                    ),
+                    session_id,
+                ),
+                key="structure_active_pick",
+            )
+            a1, a2 = st.columns(2)
+            confirm_clear = a1.checkbox("Confirm clear", key="structure_confirm_clear")
+            if a1.button(
+                "Clear Session",
+                key="structure_clear_session",
+                use_container_width=True,
+                disabled=not confirm_clear,
+            ):
+                st.session_state.last_change = _snapshot_for_undo()
+                result = clear_session(active_pick)
+                if result.get("ok", False):
+                    moved = int(result.get("moved_to_unassigned", 0) or 0)
+                    _refresh_state(f"Cleared session and moved {moved} paper(s) to unassigned.")
+                    st.rerun()
+                st.error(str(result.get("error", "Failed to clear session.")))
+            confirm_remove = a2.checkbox("Confirm remove", key="structure_confirm_remove")
+            if a2.button(
+                "Remove Session",
+                key="structure_remove_session",
+                use_container_width=True,
+                disabled=not confirm_remove,
+            ):
+                st.session_state.last_change = _snapshot_for_undo()
+                result = remove_session(active_pick)
+                if result.get("ok", False):
+                    moved = int(result.get("moved_to_unassigned", 0) or 0)
+                    _refresh_state(f"Removed session and moved {moved} paper(s) to unassigned.")
+                    st.rerun()
+                st.error(str(result.get("error", "Failed to remove session.")))
+        else:
+            st.info("No active sessions available.")
+
+    with right:
+        st.caption("Inactive Session Actions")
+        inactive_ids = [session.session_id for session in inactive_sessions]
+        if inactive_ids:
+            inactive_pick = st.selectbox(
+                "Select inactive session",
+                inactive_ids,
+                format_func=lambda session_id: next(
+                    (
+                        f"{s.session_code} | {s.day_label} | {s.time} | {s.room} | cap {s.capacity}"
+                        for s in inactive_sessions
+                        if s.session_id == session_id
+                    ),
+                    session_id,
+                ),
+                key="structure_inactive_pick",
+            )
+            if st.button("Restore Session", key="structure_restore_session", use_container_width=True):
+                st.session_state.last_change = _snapshot_for_undo()
+                result = restore_session(inactive_pick, config_path=_app_config_path())
+                if result.get("ok", False):
+                    _refresh_state("Restored session to active.")
+                    st.rerun()
+                st.error(str(result.get("error", "Failed to restore session.")))
+        else:
+            st.info("No inactive sessions available.")
+
+    st.markdown("#### Create Session")
+    day_options = list(config.days) or sorted({row.get("DayLabel", "") for row in session_rows if row.get("DayLabel", "")})
+    if not day_options:
+        day_options = ["Day 1"]
+    with st.form("create_session_form", clear_on_submit=False):
+        day_label = st.selectbox("Day", day_options, key="create_session_day")
+        block_label = st.text_input("Block Label", value="SESSION 1", key="create_session_block")
+        time_label = st.text_input("Time Label", value="09h30-11h00", key="create_session_time")
+        room = st.text_input("Room", value="R-New", key="create_session_room")
+        capacity = st.number_input(
+            "Capacity",
+            min_value=1,
+            max_value=20,
+            value=config.structure.default_session_capacity,
+            step=1,
+            key="create_session_capacity",
+        )
+        session_code = st.text_input("Session Code (optional)", value="", key="create_session_code")
+        create_submit = st.form_submit_button("Create Session", use_container_width=True)
+        if create_submit:
+            st.session_state.last_change = _snapshot_for_undo()
+            result = create_session(
+                day_label=day_label,
+                block_label=block_label,
+                time_label=time_label,
+                room=room,
+                capacity=int(capacity),
+                session_code=session_code,
+                source="manual",
+                config_path=_app_config_path(),
+            )
+            if result.get("ok", False):
+                _refresh_state(f"Created session {result.get('session_code', '')}.")
+                st.rerun()
+            st.error(str(result.get("error", "Failed to create session.")))
+
+    st.markdown("#### Add Room (Single Block)")
+    block_options = []
+    for session in active_sessions:
+        block_options.append(
+            (
+                session.day_label,
+                session.block_label,
+                session.time,
+                f"{session.day_label} | {session.block_label} | {session.time}",
+            )
+        )
+    deduped: Dict[str, Tuple[str, str, str]] = {}
+    for day_label, block_label, time_label, label in block_options:
+        deduped[label] = (day_label, block_label, time_label)
+    sorted_labels = sorted(deduped.keys())
+    if sorted_labels:
+        with st.form("add_room_form", clear_on_submit=False):
+            block_pick = st.selectbox("Block/Time", sorted_labels, key="add_room_block_pick")
+            new_room = st.text_input("New Room", value="R-New2", key="add_room_name")
+            new_capacity = st.number_input(
+                "Capacity",
+                min_value=1,
+                max_value=20,
+                value=config.structure.default_session_capacity,
+                step=1,
+                key="add_room_capacity",
+            )
+            add_room_submit = st.form_submit_button("Add Room Session", use_container_width=True)
+            if add_room_submit:
+                day_label, block_label, time_label = deduped[block_pick]
+                st.session_state.last_change = _snapshot_for_undo()
+                result = add_room_session(
+                    day_label=day_label,
+                    block_label=block_label,
+                    time_label=time_label,
+                    room=new_room,
+                    capacity=int(new_capacity),
+                    config_path=_app_config_path(),
+                )
+                if result.get("ok", False):
+                    _refresh_state(f"Added room session {result.get('session_code', '')}.")
+                    st.rerun()
+                st.error(str(result.get("error", "Failed to add room session.")))
+    else:
+        st.info("No active block/time combinations available yet. Create a first session above.")
+
+    st.markdown("#### Manual Talks (From-Scratch Input)")
+    manual_papers = load_manual_talks(MANUAL_TALKS_FILE)
+    if manual_papers:
+        manual_rows = [
+            {
+                "SubmissionID": paper.submission_id,
+                "Presenter": paper.full_name,
+                "Title": paper.title,
+                "Themes": paper.source_themes,
+            }
+            for paper in manual_papers
+        ]
+        st.dataframe(pd.DataFrame(manual_rows), use_container_width=True, hide_index=True)
+    else:
+        st.caption("No manual talks yet.")
+
+    with st.form("manual_talk_form", clear_on_submit=True):
+        full_name = st.text_input("Presenter Name", value="")
+        title = st.text_input("Talk Title", value="")
+        abstract = st.text_area("Abstract", value="", height=120)
+        themes = st.text_input("Themes (comma-separated)", value="")
+        email = st.text_input("Email", value="")
+        link_to_pdf = st.text_input("PDF URL", value="")
+        manual_submit = st.form_submit_button("Add Manual Talk", use_container_width=True)
+        if manual_submit:
+            st.session_state.last_change = _snapshot_for_undo()
+            result = create_manual_talk(
+                full_name=full_name,
+                title=title,
+                abstract=abstract,
+                themes=themes,
+                email=email,
+                link_to_pdf=link_to_pdf,
+                manual_talks_path=MANUAL_TALKS_FILE,
+                paper_placements_path=PAPER_PLACEMENTS_FILE,
+            )
+            if result.get("ok", False):
+                _refresh_state(f"Added manual talk {result.get('submission_id', '')}.")
+                st.rerun()
+            st.error(str(result.get("error", "Failed to add manual talk.")))
 
 
 def _quality_panel(edited_count: int, not_edited_count: int) -> None:
@@ -419,6 +785,10 @@ def _quality_panel(edited_count: int, not_edited_count: int) -> None:
                 "unassigned_submission_ids": v.get("unassigned_submission_ids", []),
                 "overflow_by_session": v.get("overflow_by_session", {}),
                 "slot_conflicts": v.get("slot_conflicts", []),
+                "inactive_sessions": v.get("inactive_sessions", 0),
+                "incomplete_sessions": v.get("incomplete_sessions", []),
+                "duplicate_session_codes": v.get("duplicate_session_codes", []),
+                "duplicate_session_slots": v.get("duplicate_session_slots", []),
                 "day1_opening_assigned_sessions": v.get("day1_opening_assigned_sessions", []),
                 "optional_block_assigned_sessions": v.get("optional_block_assigned_sessions", []),
             }
@@ -488,7 +858,7 @@ def _paper_location_summary(paper: object) -> str:
     if status == "unassigned":
         return "Unassigned"
     if status == "scheduled":
-        if session_code and talk_index in {1, 2, 3, 4}:
+        if session_code and talk_index > 0:
             return f"Scheduled in {session_code} slot {talk_index}"
         return "Scheduled"
     if status == "overflow":
@@ -512,10 +882,10 @@ def _candidate_sort_key(paper: object) -> tuple:
     )
 
 
-def _set_programme_selection(kind: str, session_code: str, talk_index: int = 0) -> None:
+def _set_programme_selection(kind: str, session_id: str, talk_index: int = 0) -> None:
     st.session_state.programme_selection = {
         "kind": kind,
-        "session_code": session_code,
+        "session_id": session_id,
         "talk_index": int(talk_index),
     }
 
@@ -535,14 +905,13 @@ def _render_programme_block_grid(
 
     first = block_sessions[0]
     block_label = _clean_display_text(first.block_label)
-    start = parse_start_minutes(first.time)
     title_limit = max(56, int(column_width_px / 3))
     slot_title_limit = max(42, int(column_width_px / 3))
     presenter_limit = max(24, int(column_width_px / 8))
 
     st.markdown(
         f"**{html.escape(block_label)}**  \n"
-        f"`{format_minutes(start)}-{format_minutes(start + 90)}`"
+        f"`{format_minutes(first.start_min)}-{format_minutes(first.end_min)}`"
     )
 
     rooms = sorted([session.room for session in block_sessions], key=room_sort_key)
@@ -550,11 +919,11 @@ def _render_programme_block_grid(
     row_size = max(1, min(len(rooms), int(rooms_per_row)))
     selection = st.session_state.get("programme_selection", {})
     selected_kind = ""
-    selected_session_code = ""
+    selected_session_id = ""
     selected_talk_index = 0
     if isinstance(selection, dict):
         selected_kind = _normalize_text(selection.get("kind", "")).lower()
-        selected_session_code = _normalize_text(selection.get("session_code", ""))
+        selected_session_id = _normalize_text(selection.get("session_id", ""))
         selected_talk_index = int(selection.get("talk_index", 0) or 0)
 
     for start_idx in range(0, len(rooms), row_size):
@@ -566,32 +935,32 @@ def _render_programme_block_grid(
                 with st.container(border=True):
                     st.caption(f"Room: {room} | {session.session_code}")
                     session_button_label = _clip_text(session.session_title, title_limit)
-                    session_is_selected = selected_kind == "session" and selected_session_code == session.session_code
+                    session_is_selected = selected_kind == "session" and selected_session_id == session.session_id
                     if st.button(
                         session_button_label,
-                        key=f"select_session_{session.session_code}_{session.day_num}_{session.block_num}",
+                        key=f"select_session_{session.session_id}_{session.day_num}_{session.block_num}",
                         type="primary",
                         use_container_width=True,
                     ):
-                        _set_programme_selection("session", session.session_code, 0)
+                        _set_programme_selection("session", session.session_id, 0)
                         st.rerun()
 
-                    for talk_idx in range(1, 5):
+                    for talk_idx in range(1, max(1, session.capacity) + 1):
                         paper = session.papers[talk_idx - 1]
                         slot_is_selected = (
                             selected_kind == "slot"
-                            and selected_session_code == session.session_code
+                            and selected_session_id == session.session_id
                             and selected_talk_index == talk_idx
                         )
 
                         if paper is None:
                             if st.button(
                                 "[Empty slot]",
-                                key=f"select_empty_{session.session_code}_{talk_idx}",
+                                key=f"select_empty_{session.session_id}_{talk_idx}",
                                 type="primary" if slot_is_selected else "secondary",
                                 use_container_width=True,
                             ):
-                                _set_programme_selection("slot", session.session_code, talk_idx)
+                                _set_programme_selection("slot", session.session_id, talk_idx)
                                 st.rerun()
                             continue
 
@@ -601,128 +970,16 @@ def _render_programme_block_grid(
                         slot_button_label = f"\"{title}\"\n({presenter})"
                         if st.button(
                             slot_button_label,
-                            key=f"select_slot_{session.session_code}_{talk_idx}",
+                            key=f"select_slot_{session.session_id}_{talk_idx}",
                             type="primary" if slot_is_selected else "secondary",
                             use_container_width=True,
                             help=abstract_preview,
                         ):
-                            _set_programme_selection("slot", session.session_code, talk_idx)
+                            _set_programme_selection("slot", session.session_id, talk_idx)
                             st.rerun()
 
                     if session.overflow_papers:
                         st.error(f"Overflow: {len(session.overflow_papers)}")
-
-
-def _sortable_result_to_header_items(raw_result: object, headers: List[str]) -> Optional[Dict[str, List[str]]]:
-    if not isinstance(raw_result, list):
-        return None
-
-    parsed: Dict[str, List[str]] = {}
-
-    if len(raw_result) == len(headers) and all(isinstance(item, dict) for item in raw_result):
-        for idx, item in enumerate(raw_result):
-            header = _normalize_text(item.get("header", "")) or headers[idx]
-            items = item.get("items", [])
-            if not isinstance(items, list):
-                items = []
-            parsed[header] = [str(v) for v in items]
-        return parsed
-
-    if len(raw_result) == len(headers) and all(isinstance(item, list) for item in raw_result):
-        for idx, items in enumerate(raw_result):
-            parsed[headers[idx]] = [str(v) for v in items]
-        return parsed
-
-    return None
-
-
-def _render_dragdrop_board(block_sessions: List[object], unassigned_papers: List[object]) -> bool:
-    if sortable_items is None:
-        st.info("Drag/drop board unavailable: install `streamlit-sortables` to enable it. Click-based move controls remain available below.")
-        return False
-
-    header_to_session: Dict[str, str] = {}
-    containers: List[Dict[str, object]] = []
-
-    for session in block_sessions:
-        header = f"{session.session_code} ({session.room})"
-        header_to_session[header] = session.session_code
-        cards: List[str] = []
-        for paper in session.papers:
-            if paper is not None:
-                cards.append(_paper_drag_label(paper.submission_id, paper.title))
-        for paper in session.overflow_papers:
-            cards.append(_paper_drag_label(paper.submission_id, paper.title))
-        containers.append({"header": header, "items": cards})
-
-    unassigned_header = "UNASSIGNED"
-    header_to_session[unassigned_header] = ""
-    containers.append(
-        {
-            "header": unassigned_header,
-            "items": [_paper_drag_label(p.submission_id, p.title) for p in unassigned_papers],
-        }
-    )
-
-    baseline = {
-        block["header"]: [_sid_from_drag_label(item) for item in block["items"]]
-        for block in containers
-    }
-
-    st.caption("Drag/drop board: move papers across sessions and UNASSIGNED. First 4 in each session are scheduled; extras become overflow.")
-    raw_result = sortable_items(containers, direction="horizontal", multi_containers=True)
-
-    parsed = _sortable_result_to_header_items(raw_result, [container["header"] for container in containers])
-    if parsed is None:
-        return False
-
-    current = {
-        header: [_sid_from_drag_label(item) for item in parsed.get(header, []) if _sid_from_drag_label(item)]
-        for header in baseline.keys()
-    }
-
-    if current == baseline:
-        return False
-
-    updates: Dict[str, Dict[str, object]] = {}
-
-    for header, session_code in header_to_session.items():
-        sids = []
-        seen = set()
-        for sid in current.get(header, []):
-            if sid and sid not in seen:
-                seen.add(sid)
-                sids.append(sid)
-
-        if not session_code:
-            for sid in sids:
-                updates[sid] = {
-                    "PlacementStatus": "unassigned",
-                    "SessionCode": "",
-                    "TalkIndex": "",
-                    "OverflowOrder": "",
-                }
-            continue
-
-        for idx, sid in enumerate(sids, start=1):
-            if idx <= 4:
-                updates[sid] = {
-                    "PlacementStatus": "scheduled",
-                    "SessionCode": session_code,
-                    "TalkIndex": str(idx),
-                    "OverflowOrder": "",
-                }
-            else:
-                updates[sid] = {
-                    "PlacementStatus": "overflow",
-                    "SessionCode": session_code,
-                    "TalkIndex": "",
-                    "OverflowOrder": str(idx - 4),
-                }
-
-    if _apply_layout_updates(updates, "Applied drag/drop layout changes."):
-        st.rerun()
-    return True
 
 
 def _on_inspector_paper_fields_change(submission_id: str) -> None:
@@ -745,7 +1002,7 @@ def _render_paper_slot_inspector(
     session: object,
     talk_index: int,
     paper: object,
-    all_session_codes: List[str],
+    all_sessions: List[object],
 ) -> None:
     st.markdown("**Paper Slot**")
     st.caption(
@@ -820,18 +1077,29 @@ def _render_paper_slot_inspector(
 
     st.markdown("---")
     st.caption("Placement")
-    if all_session_codes:
-        default_idx = all_session_codes.index(session.session_code) if session.session_code in all_session_codes else 0
-        target_session = st.selectbox(
+    if all_sessions:
+        session_ids = [s.session_id for s in all_sessions]
+        default_idx = session_ids.index(session.session_id) if session.session_id in session_ids else 0
+
+        def _format_session_pick(session_id: str) -> str:
+            selected = next((s for s in all_sessions if s.session_id == session_id), None)
+            if selected is None:
+                return session_id
+            return f"{selected.session_code} | {selected.day_label} | {selected.time} | {selected.room} | cap {selected.capacity}"
+
+        target_session_id = st.selectbox(
             "Target Session",
-            all_session_codes,
+            session_ids,
             index=default_idx,
             key=f"ins_move_session_{paper.submission_id}",
+            format_func=_format_session_pick,
         )
+        target_session = next((s for s in all_sessions if s.session_id == target_session_id), None)
+        max_slots = max(1, int(getattr(target_session, "capacity", 1) if target_session is not None else 1))
         target_slot = st.selectbox(
             "Target Slot",
-            [1, 2, 3, 4],
-            index=max(0, min(3, talk_index - 1)),
+            list(range(1, max_slots + 1)),
+            index=max(0, min(max_slots - 1, talk_index - 1)),
             key=f"ins_move_slot_{paper.submission_id}",
         )
         if st.button("Move Paper", key=f"ins_move_btn_{paper.submission_id}", use_container_width=True):
@@ -839,26 +1107,26 @@ def _render_paper_slot_inspector(
                 {
                     paper.submission_id: {
                         "PlacementStatus": "scheduled",
-                        "SessionCode": target_session,
+                        "SessionId": target_session_id,
                         "TalkIndex": str(target_slot),
                         "OverflowOrder": "",
                     }
                 },
-                f"Moved {paper.submission_id} to {target_session} slot {target_slot}.",
+                f"Moved {paper.submission_id} to {target_session.session_code if target_session else target_session_id} slot {target_slot}.",
             ):
                 st.rerun()
 
     st.caption("If the target slot/session is full, the move is kept as overflow and flagged in Quality.")
     if st.button("Drop To Unassigned", key=f"ins_drop_{paper.submission_id}", use_container_width=True):
         if _apply_layout_updates(
-            {
-                paper.submission_id: {
-                    "PlacementStatus": "unassigned",
-                    "SessionCode": "",
-                    "TalkIndex": "",
-                    "OverflowOrder": "",
-                }
-            },
+                {
+                    paper.submission_id: {
+                        "PlacementStatus": "unassigned",
+                        "SessionId": "",
+                        "TalkIndex": "",
+                        "OverflowOrder": "",
+                    }
+                },
             f"Moved {paper.submission_id} to unassigned.",
         ):
             st.rerun()
@@ -897,7 +1165,7 @@ def _render_empty_slot_inspector(state, session: object, talk_index: int) -> Non
         "Assign or move paper",
         options,
         format_func=_format_pick,
-        key=f"ins_empty_pick_{session.session_code}_{talk_index}",
+        key=f"ins_empty_pick_{session.session_id}_{talk_index}",
     )
     selected_paper = paper_map.get(_normalize_text(pick))
     if selected_paper is not None and _normalize_text(selected_paper.placement_status).lower() != "unassigned":
@@ -905,7 +1173,7 @@ def _render_empty_slot_inspector(state, session: object, talk_index: int) -> Non
 
     if st.button(
         "Assign To This Slot",
-        key=f"ins_empty_assign_{session.session_code}_{talk_index}",
+        key=f"ins_empty_assign_{session.session_id}_{talk_index}",
         use_container_width=True,
     ):
         sid = _normalize_text(pick)
@@ -914,7 +1182,7 @@ def _render_empty_slot_inspector(state, session: object, talk_index: int) -> Non
                 {
                     sid: {
                         "PlacementStatus": "scheduled",
-                        "SessionCode": session.session_code,
+                        "SessionId": session.session_id,
                         "TalkIndex": str(talk_index),
                         "OverflowOrder": "",
                     }
@@ -924,7 +1192,7 @@ def _render_empty_slot_inspector(state, session: object, talk_index: int) -> Non
                 st.rerun()
 
 
-def _render_session_inspector(state, session: object, all_session_codes: List[str]) -> None:
+def _render_session_inspector(state, session: object, all_sessions: List[object]) -> None:
     st.markdown("**Session**")
     st.caption(f"{session.session_code} | {session.time} | {session.room}")
 
@@ -943,28 +1211,95 @@ def _render_session_inspector(state, session: object, all_session_codes: List[st
     )
     st.caption(f"Theme: {session.primary_theme}")
     st.caption(f"Subtheme: {session.subtheme}")
+    st.caption(f"Capacity: {session.capacity}")
+
+    st.markdown("---")
+    st.caption("Structure")
+    cap_col, code_col = st.columns(2)
+    new_capacity = cap_col.number_input(
+        "Capacity",
+        min_value=1,
+        max_value=20,
+        value=max(1, int(session.capacity)),
+        step=1,
+        key=f"ins_capacity_{session.session_id}",
+    )
+    new_code = code_col.text_input(
+        "Session Code",
+        value=session.session_code,
+        key=f"ins_session_code_{session.session_id}",
+    )
+    if st.button("Apply Structure Changes", key=f"ins_apply_structure_{session.session_id}", use_container_width=True):
+        snapshot = _snapshot_for_undo()
+        result = update_session_structure_row(
+            session.session_id,
+            {"Capacity": str(int(new_capacity)), "SessionCode": new_code},
+        )
+        if not result.get("ok", False):
+            st.error(str(result.get("error", "Failed to update session structure.")))
+        else:
+            st.session_state.last_change = snapshot
+            _refresh_state(f"Updated structure for {session.session_code}.")
+            st.rerun()
 
     st.markdown("---")
     st.caption("Session Slots")
-    for talk_idx in range(1, 5):
+    for talk_idx in range(1, max(1, session.capacity) + 1):
         paper = session.papers[talk_idx - 1]
         if paper is None:
             st.write(f"Slot {talk_idx}: [Empty slot]")
             if st.button(
                 f"Open Empty Slot {talk_idx}",
-                key=f"ins_open_empty_{session.session_code}_{talk_idx}",
+                key=f"ins_open_empty_{session.session_id}_{talk_idx}",
                 use_container_width=True,
             ):
-                _set_programme_selection("slot", session.session_code, talk_idx)
+                _set_programme_selection("slot", session.session_id, talk_idx)
                 st.rerun()
             continue
         st.write(f"Slot {talk_idx}: {paper.submission_id} | {_clip_text(paper.full_name, 52)}")
         if st.button(
             f"Open Slot {talk_idx}",
-            key=f"ins_open_slot_{session.session_code}_{talk_idx}",
+            key=f"ins_open_slot_{session.session_id}_{talk_idx}",
             use_container_width=True,
         ):
-            _set_programme_selection("slot", session.session_code, talk_idx)
+            _set_programme_selection("slot", session.session_id, talk_idx)
+            st.rerun()
+
+    st.markdown("---")
+    st.caption("Session Lifecycle")
+    action_col1, action_col2 = st.columns(2)
+    confirm_clear = action_col1.checkbox("Confirm clear", key=f"ins_confirm_clear_{session.session_id}")
+    if action_col1.button(
+        "Clear Session",
+        key=f"ins_clear_session_{session.session_id}",
+        use_container_width=True,
+        disabled=not confirm_clear,
+    ):
+        snapshot = _snapshot_for_undo()
+        result = clear_session(session.session_id)
+        if not result.get("ok", False):
+            st.error(str(result.get("error", "Failed to clear session.")))
+        else:
+            st.session_state.last_change = snapshot
+            moved = int(result.get("moved_to_unassigned", 0) or 0)
+            _refresh_state(f"Cleared {session.session_code} and moved {moved} paper(s) to unassigned.")
+            st.rerun()
+    confirm_remove = action_col2.checkbox("Confirm remove", key=f"ins_confirm_remove_{session.session_id}")
+    if action_col2.button(
+        "Remove Session",
+        key=f"ins_remove_session_{session.session_id}",
+        use_container_width=True,
+        disabled=not confirm_remove,
+    ):
+        snapshot = _snapshot_for_undo()
+        result = remove_session(session.session_id)
+        if not result.get("ok", False):
+            st.error(str(result.get("error", "Failed to remove session.")))
+        else:
+            st.session_state.last_change = snapshot
+            _clear_programme_selection()
+            moved = int(result.get("moved_to_unassigned", 0) or 0)
+            _refresh_state(f"Removed {session.session_code}; {moved} paper(s) moved to unassigned.")
             st.rerun()
 
     st.markdown("---")
@@ -993,45 +1328,57 @@ def _render_session_inspector(state, session: object, all_session_codes: List[st
                     unsafe_allow_html=True,
                 )
 
-            target_session = st.selectbox(
+            session_ids = [s.session_id for s in all_sessions]
+            default_idx = session_ids.index(session.session_id) if session.session_id in session_ids else 0
+            target_session_id = st.selectbox(
                 "Target Session",
-                all_session_codes,
-                index=all_session_codes.index(session.session_code) if session.session_code in all_session_codes else 0,
-                key=f"ins_ov_target_session_{paper.submission_id}_{session.session_code}_{overflow_pos}",
+                session_ids,
+                index=default_idx,
+                key=f"ins_ov_target_session_{paper.submission_id}_{session.session_id}_{overflow_pos}",
+                format_func=lambda session_id: next(
+                    (
+                        f"{s.session_code} | {s.day_label} | {s.time} | {s.room} | cap {s.capacity}"
+                        for s in all_sessions
+                        if s.session_id == session_id
+                    ),
+                    session_id,
+                ),
             )
+            target_session = next((s for s in all_sessions if s.session_id == target_session_id), None)
+            target_capacity = max(1, int(getattr(target_session, "capacity", 1) if target_session is not None else 1))
             target_slot = st.selectbox(
                 "Target Slot",
-                [1, 2, 3, 4],
+                list(range(1, target_capacity + 1)),
                 index=0,
-                key=f"ins_ov_target_slot_{paper.submission_id}_{session.session_code}_{overflow_pos}",
+                key=f"ins_ov_target_slot_{paper.submission_id}_{session.session_id}_{overflow_pos}",
             )
             if st.button(
                 "Move Overflow Paper",
-                key=f"ins_ov_move_{paper.submission_id}_{session.session_code}_{overflow_pos}",
+                key=f"ins_ov_move_{paper.submission_id}_{session.session_id}_{overflow_pos}",
                 use_container_width=True,
             ):
                 if _apply_layout_updates(
                     {
                         paper.submission_id: {
                             "PlacementStatus": "scheduled",
-                            "SessionCode": target_session,
+                            "SessionId": target_session_id,
                             "TalkIndex": str(target_slot),
                             "OverflowOrder": "",
                         }
                     },
-                    f"Moved {paper.submission_id} to {target_session} slot {target_slot}.",
+                    f"Moved {paper.submission_id} to {target_session.session_code if target_session else target_session_id} slot {target_slot}.",
                 ):
                     st.rerun()
             if st.button(
                 "Drop Overflow To Unassigned",
-                key=f"ins_ov_drop_{paper.submission_id}_{session.session_code}_{overflow_pos}",
+                key=f"ins_ov_drop_{paper.submission_id}_{session.session_id}_{overflow_pos}",
                 use_container_width=True,
             ):
                 if _apply_layout_updates(
                     {
                         paper.submission_id: {
                             "PlacementStatus": "unassigned",
-                            "SessionCode": "",
+                            "SessionId": "",
                             "TalkIndex": "",
                             "OverflowOrder": "",
                         }
@@ -1056,25 +1403,25 @@ def _render_programme_inspector(state) -> None:
     c2.metric("Overflow", overflow_count)
 
     selection = st.session_state.get("programme_selection", {})
-    if not isinstance(selection, dict) or not selection.get("session_code"):
+    if not isinstance(selection, dict) or not selection.get("session_id"):
         st.info("Nothing selected yet.")
         return
 
-    session_map = {session.session_code: session for session in state.sessions}
-    session = session_map.get(selection.get("session_code", ""))
+    session_map = {session.session_id: session for session in state.sessions}
+    session = session_map.get(_normalize_text(selection.get("session_id", "")))
     if session is None:
         st.warning("Selected item is no longer available. Pick another slot/session.")
         _clear_programme_selection()
         return
 
-    all_session_codes = [s.session_code for s in sorted(state.sessions, key=_session_sort_key)]
+    all_sessions = list(sorted(state.sessions, key=_session_sort_key))
     kind = _normalize_text(selection.get("kind", ""))
     if kind == "session":
-        _render_session_inspector(state, session, all_session_codes)
+        _render_session_inspector(state, session, all_sessions)
         return
 
     talk_index = int(selection.get("talk_index", 0) or 0)
-    if talk_index not in {1, 2, 3, 4}:
+    if talk_index < 1 or talk_index > len(session.papers):
         st.warning("Invalid slot selection. Pick a slot again.")
         return
 
@@ -1082,269 +1429,65 @@ def _render_programme_inspector(state) -> None:
     if paper is None:
         _render_empty_slot_inspector(state, session, talk_index)
     else:
-        _render_paper_slot_inspector(state, session, talk_index, paper, all_session_codes)
-
-
-def _render_programme_tab(state) -> None:
-    st.subheader("Programme")
-
-    talks_df = pd.DataFrame(programme_talk_rows(state))
-    if talks_df.empty:
-        st.info("No programme data loaded.")
-        return
-
-    day_options = sorted(talks_df["Day"].unique().tolist())
-    day_pick = st.selectbox("Day", day_options, key="programme_day")
-    day_talks = talks_df[talks_df["Day"] == day_pick].copy()
-    block_rows = _day_block_rows(day_talks)
-
-    if not block_rows:
-        st.info("No programme blocks available for this day.")
-        return
-
-    block_labels = ["All blocks"] + [row["Label"] for row in block_rows]
-    c1, c2 = st.columns([2.8, 3.6])
-    with c1:
-        selected_block_label = st.selectbox(
-            "Block (optional)",
-            block_labels,
-            key=f"programme_block_filter_{day_pick}",
-        )
-    with c2:
-        column_width = st.slider("Column Width", min_value=220, max_value=560, value=360, step=10)
-
-    selection = st.session_state.get("programme_selection", {})
-    has_selection = isinstance(selection, dict) and bool(selection.get("session_code"))
-
-    if selected_block_label == "All blocks":
-        candidate_blocks = block_rows
-    else:
-        selected_block = next((row for row in block_rows if row["Label"] == selected_block_label), None)
-        if selected_block is None:
-            st.warning("Selected block not found.")
-            return
-        candidate_blocks = [selected_block]
-
-    max_rooms = 1
-    for block in candidate_blocks:
-        room_count = len(
-            _get_block_sessions(
-                state,
-                day_pick,
-                block["BlockNum"],
-                block["Time"],
-                block["Block"],
-            )
-        )
-        max_rooms = max(max_rooms, room_count)
-
-    width_budget = 960 if has_selection else 1450
-    rooms_per_row = max(1, min(max_rooms, width_budget // max(220, column_width)))
-    st.caption(f"Layout density: {rooms_per_row} room card(s) per row.")
-
-    def _render_grid_content() -> None:
-        st.caption("Click a session card or slot block to open the inspector.")
-
-        for block in candidate_blocks:
-            block_sessions = _get_block_sessions(
-                state,
-                day_pick,
-                block["BlockNum"],
-                block["Time"],
-                block["Block"],
-            )
-            _render_programme_block_grid(
-                block_sessions,
-                column_width_px=column_width,
-                rooms_per_row=rooms_per_row,
-            )
-
-    if has_selection:
-        left_col, right_col = st.columns([3.2, 1.2], gap="large")
-        with left_col:
-            _render_grid_content()
-        with right_col:
-            _render_programme_inspector(state)
-    else:
-        _render_grid_content()
-
-
-def _render_top_actions(not_edited_count: int) -> None:
-    state = st.session_state.wic_state
-    v = state.validations
-
-    if v.get("has_planning_issues", False):
-        st.warning(
-            "Planning issues exist (overflow/unassigned/collisions). You can still publish, but review the Quality tab first."
-        )
-
-    a1, a2, a3, a4 = st.columns([1.4, 1.1, 1.1, 1.1])
-
-    if a1.button("Publish (Excel + PDF)", type="primary", use_container_width=True):
-        try:
-            if not_edited_count > 0:
-                st.warning(f"Publishing with {not_edited_count} not-edited papers.")
-            xlsx_path = export_publish_excel(st.session_state.wic_state)
-            pdf_path = export_publish_pdf(st.session_state.wic_state)
-            st.success(f"Publish Excel: {xlsx_path}")
-            st.success(f"Publish PDF: {pdf_path}")
-        except Exception as exc:
-            st.error(f"Publish failed: {exc}")
-
-    undo_disabled = st.session_state.last_change is None
-    if a2.button("Undo Last Change", disabled=undo_disabled, use_container_width=True):
-        if _undo_last_change():
-            st.rerun()
-
-    if a3.button("Reload From Disk", use_container_width=True):
-        _refresh_state("Reloaded from disk.")
-        st.rerun()
-
-    if a4.button("Export Draft", use_container_width=True):
-        try:
-            path = export_draft_workbook(st.session_state.wic_state)
-            st.success(f"Draft exported: {path}")
-        except Exception as exc:
-            st.error(f"Draft export failed: {exc}")
-
-    st.caption("Session code format: `D{day}-B{block}-{room}`")
+        _render_paper_slot_inspector(state, session, talk_index, paper, all_sessions)
 
 
 _init_session_state()
 state = st.session_state.wic_state
-edited_ids = _edited_submission_ids()
+edited_ids = set(getattr(state, "edited_submission_ids", set()))
 edited_count = len([p for p in state.papers if p.submission_id in edited_ids])
 not_edited_count = len(state.papers) - edited_count
 
-st.title("WIC 2026 Reclassification Studio")
+st.title(APP_TITLE)
 st.caption("Programme-first mode: edits are auto-applied, auto-saved, and synced immediately across tabs.")
 
 if st.session_state.flash_message:
     st.success(st.session_state.flash_message)
     st.session_state.flash_message = ""
 
-_render_top_actions(not_edited_count)
+render_top_actions(
+    state=state,
+    not_edited_count=not_edited_count,
+    can_undo=st.session_state.last_change is not None,
+    undo_last_change=_undo_last_change,
+    refresh_state=_refresh_state,
+    export_publish_excel=export_publish_excel,
+    export_publish_pdf=export_publish_pdf,
+    export_draft_workbook=export_draft_workbook,
+)
 
-_tabs = st.tabs(["Programme", "Paper List", "Session Names", "Quality"])
+_tabs = st.tabs(["Programme", "Structure", "Paper List", "Session Names", "Quality"])
 
 with _tabs[0]:
-    _render_programme_tab(state)
+    render_programme_tab_view(
+        state=state,
+        programme_talk_rows=programme_talk_rows,
+        day_block_rows=_day_block_rows,
+        get_block_sessions=_get_block_sessions,
+        render_programme_block_grid=_render_programme_block_grid,
+        render_programme_inspector=_render_programme_inspector,
+    )
 
 with _tabs[1]:
-    st.subheader("Paper List")
-    papers_df = pd.DataFrame(papers_to_rows(state))
-
-    f1, f2, f3, f4, f5, f6 = st.columns([2, 2, 2, 2, 2, 3])
-    theme_filter = f1.selectbox("Theme", ["All"] + sorted(papers_df["PrimaryTheme"].dropna().unique().tolist()))
-    subtheme_filter = f2.selectbox("Subtheme", ["All"] + sorted(papers_df["Subtheme"].dropna().unique().tolist()))
-    day_filter = f3.selectbox("Day", ["All"] + sorted(papers_df["Day"].dropna().unique().tolist()))
-    block_filter = f4.selectbox("Block", ["All"] + sorted(papers_df["Block"].dropna().unique().tolist()))
-    room_filter = f5.selectbox("Room", ["All"] + sorted(papers_df["Room"].dropna().unique().tolist()))
-    query = f6.text_input("Search title/presenter", "")
-
-    show_not_edited_only = st.checkbox("Show not-edited papers only", value=False)
-
-    filtered = papers_df.copy()
-    if theme_filter != "All":
-        filtered = filtered[filtered["PrimaryTheme"] == theme_filter]
-    if subtheme_filter != "All":
-        filtered = filtered[filtered["Subtheme"] == subtheme_filter]
-    if day_filter != "All":
-        filtered = filtered[filtered["Day"] == day_filter]
-    if block_filter != "All":
-        filtered = filtered[filtered["Block"] == block_filter]
-    if room_filter != "All":
-        filtered = filtered[filtered["Room"] == room_filter]
-    if show_not_edited_only:
-        filtered = filtered[~filtered["SubmissionID"].isin(edited_ids)]
-    if query.strip():
-        q = query.strip().lower()
-        filtered = filtered[
-            filtered["Title"].str.lower().str.contains(q, na=False)
-            | filtered["FullName"].str.lower().str.contains(q, na=False)
-            | filtered["SubmissionID"].str.lower().str.contains(q, na=False)
-        ]
-
-    edit_columns = [
-        "SubmissionID",
-        "FullName",
-        "Title",
-        "PrimaryTheme",
-        "Subtheme",
-        "OverrideNotes",
-        "PlacementStatus",
-        "SessionCode",
-        "SessionTitle",
-        "Day",
-        "Block",
-        "Room",
-    ]
-
-    edited = st.data_editor(
-        filtered[edit_columns],
-        key="paper_list_editor",
-        use_container_width=True,
-        num_rows="fixed",
-        hide_index=True,
-        column_config={
-            "PrimaryTheme": st.column_config.SelectboxColumn(options=THEME_ORDER),
-            "Subtheme": st.column_config.TextColumn(),
-            "OverrideNotes": st.column_config.TextColumn(width="large"),
-            "PlacementStatus": st.column_config.TextColumn(disabled=True),
-            "SessionCode": st.column_config.TextColumn(disabled=True),
-            "SessionTitle": st.column_config.TextColumn(disabled=True, width="large"),
-            "Day": st.column_config.TextColumn(disabled=True),
-            "Block": st.column_config.TextColumn(disabled=True),
-            "Room": st.column_config.TextColumn(disabled=True),
-        },
-    )
-
-    if _apply_classification_edits_if_changed(edited):
-        st.rerun()
+    _render_structure_tab(state)
 
 with _tabs[2]:
-    st.subheader("Session Names")
-
-    sessions_df = pd.DataFrame(sessions_to_rows(state))
-    name_overrides = load_session_name_overrides(SESSION_NAME_OVERRIDES_FILE)
-    sessions_df["SessionTitleOverride"] = sessions_df["SessionCode"].map(name_overrides).fillna("")
-
-    editable_sessions = sessions_df[
-        [
-            "SessionCode",
-            "Day",
-            "Time",
-            "Block",
-            "Room",
-            "PrimaryTheme",
-            "Subtheme",
-            "SessionTitle",
-            "SessionTitleOverride",
-            "OverflowCount",
-        ]
-    ]
-
-    edited_sessions = st.data_editor(
-        editable_sessions,
-        key="session_name_editor",
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "SessionCode": st.column_config.TextColumn(disabled=True),
-            "Day": st.column_config.TextColumn(disabled=True),
-            "Time": st.column_config.TextColumn(disabled=True),
-            "Block": st.column_config.TextColumn(disabled=True),
-            "Room": st.column_config.TextColumn(disabled=True),
-            "PrimaryTheme": st.column_config.TextColumn(disabled=True),
-            "Subtheme": st.column_config.TextColumn(disabled=True),
-            "SessionTitle": st.column_config.TextColumn(disabled=True, width="large"),
-            "SessionTitleOverride": st.column_config.TextColumn(width="large"),
-            "OverflowCount": st.column_config.NumberColumn(disabled=True),
-        },
+    render_paper_list_tab(
+        state=state,
+        edited_ids=edited_ids,
+        theme_order=THEME_ORDER,
+        papers_to_rows=papers_to_rows,
+        apply_classification_edits_if_changed=_apply_classification_edits_if_changed,
     )
 
-    if _apply_session_name_edits_if_changed(edited_sessions):
-        st.rerun()
-
 with _tabs[3]:
+    render_session_names_tab(
+        state=state,
+        sessions_to_rows=sessions_to_rows,
+        load_session_name_overrides=load_session_name_overrides,
+        session_name_overrides_file=SESSION_NAME_OVERRIDES_FILE,
+        apply_session_name_edits_if_changed=_apply_session_name_edits_if_changed,
+    )
+
+with _tabs[4]:
     _quality_panel(edited_count=edited_count, not_edited_count=not_edited_count)

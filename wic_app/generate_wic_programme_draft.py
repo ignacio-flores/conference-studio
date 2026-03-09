@@ -9,7 +9,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
+from engine.config import load_conference_config
 from exporters.publish import export_draft_workbook, export_publish_excel, export_publish_pdf
 from reclassification_engine import (
     DRAFT_OUTPUT_FILE,
@@ -26,12 +28,25 @@ def main() -> None:
         action="store_true",
         help="Also generate publish Excel and PDF outputs.",
     )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="",
+        help="Optional path to conference config JSON/YAML.",
+    )
     args = parser.parse_args()
 
-    state = build_programme_state()
+    config_path = Path(args.config).expanduser().resolve() if args.config else None
+    conference_config = load_conference_config(config_path)
+
+    draft_output = DRAFT_OUTPUT_FILE.parent / conference_config.files.get("draft_output", DRAFT_OUTPUT_FILE.name)
+    publish_xlsx_output = PUBLISH_XLSX_FILE.parent / conference_config.files.get("publish_xlsx_output", PUBLISH_XLSX_FILE.name)
+    publish_pdf_output = PUBLISH_PDF_FILE.parent / conference_config.files.get("publish_pdf_output", PUBLISH_PDF_FILE.name)
+
+    state = build_programme_state(config_path=config_path)
     validations = state.validations
 
-    draft_path = export_draft_workbook(state, DRAFT_OUTPUT_FILE)
+    draft_path = export_draft_workbook(state, draft_output)
     print(f"Generated draft workbook: {draft_path}")
 
     print(f"Accepted papers: {validations.get('accepted_papers', 0)}")
@@ -49,10 +64,10 @@ def main() -> None:
         print(f"Missing papers: {validations['missing_submission_ids']}")
 
     if args.publish:
-        xlsx_path = export_publish_excel(state, PUBLISH_XLSX_FILE)
+        xlsx_path = export_publish_excel(state, publish_xlsx_output)
         print(f"Generated publish workbook: {xlsx_path}")
         try:
-            pdf_path = export_publish_pdf(state, PUBLISH_PDF_FILE)
+            pdf_path = export_publish_pdf(state, publish_pdf_output)
             print(f"Generated publish PDF: {pdf_path}")
         except RuntimeError as exc:
             print(f"Publish PDF skipped: {exc}")

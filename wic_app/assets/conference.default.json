@@ -1,0 +1,747 @@
+{
+  "conference_title": "World Inequality Conference 2026",
+  "conference_subtitle": "Publish Programme",
+  "files": {
+    "submissions": "WIC 2026 - Submissions (Reviewed).xlsx",
+    "programme": "WIC2026_Programme.xlsx",
+    "draft_output": "WIC2026_Programme_Draft.xlsx",
+    "publish_xlsx_output": "WIC2026_Programme_Publish.xlsx",
+    "publish_pdf_output": "WIC2026_Programme_Publish.pdf"
+  },
+  "days": [
+    "Day 1 (4th June)",
+    "Day 2 (5th June)",
+    "Day 3 (6th June)"
+  ],
+  "room_priority": {
+    "R2-01": 10,
+    "R2-21": 20,
+    "R1-09": 30,
+    "R2-20": 40,
+    "R1-10": 50,
+    "R3-71": 60,
+    "TBD-A": 70,
+    "TBD-B": 80,
+    "TBD-C": 90
+  },
+  "themes": {
+    "order": [
+      "Measurement of historical income and wealth inequality dynamics",
+      "Environmental inequalities",
+      "Global wealth distribution dynamics",
+      "Income and wealth mobility",
+      "Land inequality",
+      "Factors contributing to income inequalities",
+      "Political inequalities",
+      "Gender inequality",
+      "Inequality perceptions",
+      "Taxation and tax evasion",
+      "Methodological advances in inequality measurement"
+    ],
+    "short": {
+      "Measurement of historical income and wealth inequality dynamics": "Historical Measurement",
+      "Environmental inequalities": "Environmental Inequalities",
+      "Global wealth distribution dynamics": "Global Wealth Dynamics",
+      "Income and wealth mobility": "Income and Wealth Mobility",
+      "Land inequality": "Land Inequality",
+      "Factors contributing to income inequalities": "Income Inequality Drivers",
+      "Political inequalities": "Political Inequalities",
+      "Gender inequality": "Gender Inequality",
+      "Inequality perceptions": "Inequality Perceptions",
+      "Taxation and tax evasion": "Taxation and Evasion",
+      "Methodological advances in inequality measurement": "Methods and Measurement"
+    },
+    "alias": {
+      "measurement of historical dynamics of income and wealth": "Measurement of historical income and wealth inequality dynamics",
+      "environmental inequalities": "Environmental inequalities",
+      "global wealth distribution dynamics": "Global wealth distribution dynamics",
+      "income and wealth mobility": "Income and wealth mobility",
+      "intergenerational mobility": "Income and wealth mobility",
+      "land inequality": "Land inequality",
+      "agricultural land inequality": "Land inequality",
+      "factors contributing to income inequality": "Factors contributing to income inequalities",
+      "political inequalities": "Political inequalities",
+      "gender inequality": "Gender inequality",
+      "inequality perceptions": "Inequality perceptions",
+      "taxation and tax evasion": "Taxation and tax evasion",
+      "methological advances in the measurement of inequalities": "Methodological advances in inequality measurement",
+      "methodological advances in the measurement of inequalities": "Methodological advances in inequality measurement"
+    },
+    "keywords": {
+      "Measurement of historical income and wealth inequality dynamics": [
+        "historical",
+        "long run",
+        "distributional national accounts",
+        "dina",
+        "top incomes",
+        "top wealth",
+        "national accounts",
+        "historical series",
+        "wealth share"
+      ],
+      "Environmental inequalities": [
+        "climate",
+        "carbon",
+        "emissions",
+        "energy transition",
+        "warming",
+        "pollution",
+        "biodiversity",
+        "environmental justice",
+        "decarbon"
+      ],
+      "Global wealth distribution dynamics": [
+        "wealth",
+        "assets",
+        "inheritance",
+        "portfolio",
+        "rates of return",
+        "saving",
+        "capital gains",
+        "net worth"
+      ],
+      "Income and wealth mobility": [
+        "mobility",
+        "intergenerational",
+        "social mobility",
+        "upward mobility",
+        "downward mobility",
+        "opportunity",
+        "income mobility",
+        "wealth mobility",
+        "class mobility"
+      ],
+      "Land inequality": [
+        "landholding",
+        "land ownership",
+        "agrarian",
+        "agricultural",
+        "farmland",
+        "farm",
+        "tenant",
+        "rural property",
+        "land reform",
+        "tenure"
+      ],
+      "Factors contributing to income inequalities": [
+        "labor",
+        "wage",
+        "union",
+        "minimum wage",
+        "education",
+        "human capital",
+        "trade",
+        "productivity",
+        "market power",
+        "skills",
+        "employment",
+        "unemployment"
+      ],
+      "Political inequalities": [
+        "voting",
+        "election",
+        "democracy",
+        "polarization",
+        "political",
+        "institutions",
+        "party",
+        "coalition",
+        "governance"
+      ],
+      "Gender inequality": [
+        "gender",
+        "female",
+        "women",
+        "motherhood",
+        "care work",
+        "patriarchy",
+        "sex",
+        "femin"
+      ],
+      "Inequality perceptions": [
+        "perception",
+        "belief",
+        "preference",
+        "redistribution",
+        "attitudes",
+        "survey experiment",
+        "fairness"
+      ],
+      "Taxation and tax evasion": [
+        "tax",
+        "taxation",
+        "fiscal",
+        "evasion",
+        "avoidance",
+        "wealth tax",
+        "corporate tax",
+        "vat",
+        "income tax"
+      ],
+      "Methodological advances in inequality measurement": [
+        "method",
+        "methodology",
+        "estimation",
+        "identification",
+        "causal",
+        "instrumental variable",
+        "panel model",
+        "machine learning",
+        "decomposition"
+      ]
+    },
+    "subtheme_rules": {
+      "Measurement of historical income and wealth inequality dynamics": [
+        {
+          "label": "Historical Series and Archives",
+          "keywords": [
+            "historical",
+            "archive",
+            "long run",
+            "century"
+          ]
+        },
+        {
+          "label": "Distributional National Accounts and Data Infrastructure",
+          "keywords": [
+            "dina",
+            "national accounts",
+            "dataset",
+            "database"
+          ]
+        },
+        {
+          "label": "Top Incomes, Wealth Shares and Concentration",
+          "keywords": [
+            "top",
+            "wealth share",
+            "concentration",
+            "elite"
+          ]
+        },
+        {
+          "label": "Regional and Global Comparison of Inequality Trajectories",
+          "keywords": [
+            "cross-country",
+            "global",
+            "comparative",
+            "panel of countries"
+          ]
+        }
+      ],
+      "Environmental inequalities": [
+        {
+          "label": "Carbon Pricing and Climate Policy Distributional Effects",
+          "keywords": [
+            "carbon",
+            "pricing",
+            "tax",
+            "mitigation",
+            "policy"
+          ]
+        },
+        {
+          "label": "Climate Justice, Vulnerability and Adaptation",
+          "keywords": [
+            "justice",
+            "vulnerability",
+            "adaptation",
+            "resilience",
+            "loss and damage"
+          ]
+        },
+        {
+          "label": "Energy Transition, Fossil Lock-in and Decarbonization",
+          "keywords": [
+            "energy",
+            "fossil",
+            "decarbon",
+            "renewable",
+            "transition"
+          ]
+        },
+        {
+          "label": "Emissions Accounting and Environmental Footprints",
+          "keywords": [
+            "footprint",
+            "emissions",
+            "pollution",
+            "consumption-based"
+          ]
+        }
+      ],
+      "Global wealth distribution dynamics": [
+        {
+          "label": "Inheritance, Bequests and Intergenerational Wealth",
+          "keywords": [
+            "inheritance",
+            "bequest",
+            "intergenerational",
+            "estate"
+          ]
+        },
+        {
+          "label": "Asset Prices, Returns and Portfolio Dynamics",
+          "keywords": [
+            "asset",
+            "portfolio",
+            "return",
+            "capital gains",
+            "valuation"
+          ]
+        },
+        {
+          "label": "Savings, Capital Accumulation and Wealth Mobility",
+          "keywords": [
+            "saving",
+            "accumulation",
+            "mobility",
+            "net worth",
+            "capital stock"
+          ]
+        },
+        {
+          "label": "Global Wealth Convergence and Divergence",
+          "keywords": [
+            "global",
+            "between countries",
+            "convergence",
+            "divergence"
+          ]
+        }
+      ],
+      "Income and wealth mobility": [
+        {
+          "label": "Intergenerational Mobility and Equality of Opportunity",
+          "keywords": [
+            "intergenerational mobility",
+            "intergenerational",
+            "parent child",
+            "equality of opportunity",
+            "social mobility"
+          ]
+        },
+        {
+          "label": "Income Mobility Over the Life Cycle",
+          "keywords": [
+            "income mobility",
+            "life cycle",
+            "lifecycle",
+            "earnings dynamics",
+            "income transition"
+          ]
+        },
+        {
+          "label": "Wealth Mobility, Inheritance and Class Persistence",
+          "keywords": [
+            "wealth mobility",
+            "inheritance",
+            "bequest",
+            "class persistence",
+            "net worth"
+          ]
+        },
+        {
+          "label": "Mobility Traps, Segregation and Stratification",
+          "keywords": [
+            "mobility trap",
+            "segregation",
+            "stratification",
+            "neighborhood effects",
+            "upward mobility"
+          ]
+        }
+      ],
+      "Land inequality": [
+        {
+          "label": "Land Concentration, Ownership and Agrarian Structure",
+          "keywords": [
+            "land concentration",
+            "land ownership",
+            "landholding",
+            "agrarian",
+            "farm size"
+          ]
+        },
+        {
+          "label": "Land Reform, Redistribution and Rural Institutions",
+          "keywords": [
+            "land reform",
+            "redistribution",
+            "agrarian reform",
+            "tenancy reform",
+            "rural institution"
+          ]
+        },
+        {
+          "label": "Tenure Security, Property Rights and Informality",
+          "keywords": [
+            "tenure",
+            "property rights",
+            "titling",
+            "informality",
+            "land registry"
+          ]
+        },
+        {
+          "label": "Agricultural Productivity, Smallholders and Rural Inequality",
+          "keywords": [
+            "agricultural",
+            "smallholder",
+            "productivity",
+            "rural inequality",
+            "farm household"
+          ]
+        }
+      ],
+      "Factors contributing to income inequalities": [
+        {
+          "label": "Labor Markets, Wages and Bargaining Power",
+          "keywords": [
+            "labor",
+            "wage",
+            "union",
+            "bargaining",
+            "employment",
+            "minimum wage"
+          ]
+        },
+        {
+          "label": "Macroeconomic Drivers: Inflation, Growth and Cycles",
+          "keywords": [
+            "inflation",
+            "growth",
+            "recession",
+            "business cycle",
+            "monetary"
+          ]
+        },
+        {
+          "label": "Education, Skills and Human Capital Channels",
+          "keywords": [
+            "education",
+            "skills",
+            "school",
+            "human capital",
+            "training"
+          ]
+        },
+        {
+          "label": "Firm Dynamics, Market Power and Productivity",
+          "keywords": [
+            "firm",
+            "market power",
+            "markup",
+            "productivity",
+            "competition"
+          ]
+        },
+        {
+          "label": "Trade, Globalization and Structural Change",
+          "keywords": [
+            "trade",
+            "globalization",
+            "exports",
+            "imports",
+            "structural change"
+          ]
+        },
+        {
+          "label": "Technology, Automation and Digital Transformation",
+          "keywords": [
+            "technology",
+            "automation",
+            "ai",
+            "digital",
+            "platform"
+          ]
+        }
+      ],
+      "Political inequalities": [
+        {
+          "label": "Voting, Participation and Electoral Cleavages",
+          "keywords": [
+            "voting",
+            "electoral",
+            "participation",
+            "turnout",
+            "party"
+          ]
+        },
+        {
+          "label": "Polarization, Media and Democratic Trust",
+          "keywords": [
+            "polarization",
+            "media",
+            "trust",
+            "misinformation",
+            "social media"
+          ]
+        },
+        {
+          "label": "State Capacity, Institutions and Policy Design",
+          "keywords": [
+            "institution",
+            "state",
+            "governance",
+            "public goods",
+            "policy"
+          ]
+        },
+        {
+          "label": "Political Economy of Redistribution",
+          "keywords": [
+            "redistribution",
+            "tax policy",
+            "welfare",
+            "coalition",
+            "ideology"
+          ]
+        }
+      ],
+      "Gender inequality": [
+        {
+          "label": "Gender Wage Gaps and Labor Income Inequality",
+          "keywords": [
+            "wage gap",
+            "female labor",
+            "labor income",
+            "occupation",
+            "employment"
+          ]
+        },
+        {
+          "label": "Care Work, Household Dynamics and Time Use",
+          "keywords": [
+            "care",
+            "household",
+            "time use",
+            "motherhood",
+            "unpaid"
+          ]
+        },
+        {
+          "label": "Gendered Institutions, Norms and Social Exclusion",
+          "keywords": [
+            "norm",
+            "patriarchy",
+            "discrimination",
+            "caste",
+            "exclusion"
+          ]
+        },
+        {
+          "label": "Gender, Violence and Bodily Autonomy",
+          "keywords": [
+            "violence",
+            "harassment",
+            "agency",
+            "sexual",
+            "autonomy"
+          ]
+        }
+      ],
+      "Inequality perceptions": [
+        {
+          "label": "Perceptions of Fairness and Social Mobility",
+          "keywords": [
+            "perception",
+            "fairness",
+            "mobility",
+            "belief"
+          ]
+        },
+        {
+          "label": "Redistribution Preferences and Policy Support",
+          "keywords": [
+            "redistribution",
+            "policy support",
+            "tax support",
+            "welfare attitudes"
+          ]
+        },
+        {
+          "label": "Information, Narratives and Belief Formation",
+          "keywords": [
+            "information",
+            "narrative",
+            "framing",
+            "belief update"
+          ]
+        },
+        {
+          "label": "Experimental and Survey Evidence on Inequality Attitudes",
+          "keywords": [
+            "experiment",
+            "survey",
+            "stated preference",
+            "choice experiment"
+          ]
+        }
+      ],
+      "Taxation and tax evasion": [
+        {
+          "label": "Wealth Taxation and Capital Income Tax Design",
+          "keywords": [
+            "wealth tax",
+            "capital income",
+            "net wealth",
+            "progressive tax"
+          ]
+        },
+        {
+          "label": "Corporate Taxation, Profit Shifting and Evasion",
+          "keywords": [
+            "corporate tax",
+            "profit shifting",
+            "multinational",
+            "evasion",
+            "avoidance"
+          ]
+        },
+        {
+          "label": "Tax Incidence, Redistribution and Welfare Effects",
+          "keywords": [
+            "incidence",
+            "redistribution",
+            "welfare",
+            "fiscal",
+            "progressivity"
+          ]
+        },
+        {
+          "label": "Tax Compliance, Administration and Enforcement",
+          "keywords": [
+            "compliance",
+            "enforcement",
+            "audit",
+            "tax administration",
+            "informality"
+          ]
+        },
+        {
+          "label": "Carbon and Environmental Taxation",
+          "keywords": [
+            "carbon tax",
+            "emissions tax",
+            "green tax",
+            "climate policy"
+          ]
+        }
+      ],
+      "Methodological advances in inequality measurement": [
+        {
+          "label": "Identification Strategies and Causal Inference",
+          "keywords": [
+            "identification",
+            "instrumental variable",
+            "causal",
+            "quasi-experimental"
+          ]
+        },
+        {
+          "label": "Advanced Panel and Time-Series Methods",
+          "keywords": [
+            "panel",
+            "dynamic panel",
+            "time-series",
+            "threshold model"
+          ]
+        },
+        {
+          "label": "Distributional Decomposition and Counterfactual Methods",
+          "keywords": [
+            "decomposition",
+            "counterfactual",
+            "shapley",
+            "reweighting"
+          ]
+        },
+        {
+          "label": "Data Fusion, Harmonization and Measurement Error",
+          "keywords": [
+            "harmonization",
+            "data fusion",
+            "measurement error",
+            "imputation"
+          ]
+        },
+        {
+          "label": "Machine Learning and Computational Approaches",
+          "keywords": [
+            "machine learning",
+            "algorithm",
+            "text-as-data",
+            "nlp"
+          ]
+        }
+      ]
+    }
+  },
+  "parsing": {
+    "submissions_sheet": "Sheet1",
+    "accepted_reviewer_scores": [
+      "1"
+    ],
+    "programme": {
+      "room_header_row": 3,
+      "room_column_start": 4,
+      "room_column_end": 39,
+      "room_name_pattern": "^(Amphi|R\\d+-\\d+)$",
+      "scan_row_start": 1,
+      "scan_row_end": 89,
+      "block_column": 3,
+      "time_column": 2,
+      "session_required_token": "SESSION",
+      "optional_token": "OPTIONAL",
+      "session_label_regex": "SESSION\\s*(\\d+)",
+      "skip_time_windows": [
+        {
+          "day_label": "Day 1 (4th June)",
+          "time_label": "9h30-10h"
+        }
+      ],
+      "extra_rooms": [
+        {
+          "day_label": "*",
+          "block_nums": "*",
+          "rooms": [
+            "TBD-A",
+            "TBD-B"
+          ]
+        },
+        {
+          "day_label": "Day 2 (5th June)",
+          "block_nums": [
+            2,
+            3,
+            4
+          ],
+          "rooms": [
+            "TBD-C"
+          ]
+        }
+      ]
+    }
+  },
+  "validation": {
+    "expected_slots": 75,
+    "expected_reserve_slots": 3,
+    "strict_expected_slots": false,
+    "strict_expected_reserve_slots": false,
+    "forbidden_time_windows": [
+      {
+        "day_num": 1,
+        "time_label": "9h30-10h"
+      }
+    ],
+    "forbidden_block_tokens": [
+      "OPTIONAL"
+    ]
+  },
+  "structure": {
+    "default_session_capacity": 4,
+    "allow_duplicate_day_time_room": false,
+    "enforce_unique_session_code": true
+  }
+}
