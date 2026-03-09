@@ -89,6 +89,7 @@ class PapersViewTests(unittest.TestCase):
         self.assertIn('key=f"paper_row_details_{sid}"', text)
         self.assertIn('"Target Session"', text)
         self.assertIn("apply_paper_session_selection_edit", text)
+        self.assertNotIn("Table view with Details editor. Hover presenter for abstract preview.", text)
         self.assertNotIn("paper_row_open_presenter_", text)
         self.assertNotIn("paper_row_open_theme_", text)
         self.assertNotIn("paper_row_open_place_", text)

@@ -22,11 +22,15 @@ from reclassification_engine import (
     SESSION_STRUCTURE_FILE,
     SESSION_NAME_OVERRIDES_FILE,
     THEME_ORDER,
+    add_block_row_sessions,
+    clear_day_sessions,
+    clone_day_structure,
     bulk_add_room_sessions,
     build_programme_state,
     clear_session,
     create_manual_talk,
     create_session,
+    delete_day_sessions,
     format_minutes,
     load_manual_talks,
     load_classification_overrides,
@@ -37,6 +41,8 @@ from reclassification_engine import (
     parse_start_minutes,
     papers_to_rows,
     programme_talk_rows,
+    relabel_day_sessions,
+    rename_room_for_day,
     remove_session,
     restore_session,
     room_sort_key,
@@ -911,6 +917,43 @@ def _render_structure_room_inspector(state, selection: Dict[str, object]) -> Non
     m3.metric("Inactive this day", inactive_day)
 
     st.markdown("---")
+    st.caption("Room name")
+    rename_key = f"struct_room_rename_{day_label}_{room}"
+    rename_src_key = f"{rename_key}_src"
+    if st.session_state.get(rename_src_key) != room:
+        st.session_state[rename_key] = room
+        st.session_state[rename_src_key] = room
+    st.text_input("Room name", key=rename_key)
+    if st.button(
+        "Apply Room Rename",
+        key=f"struct_room_rename_apply_{day_label}_{room}",
+        use_container_width=True,
+    ):
+        new_room = _normalize_text(st.session_state.get(rename_key, ""))
+        snapshot = _snapshot_for_undo()
+        result = rename_room_for_day(
+            day_label=day_label,
+            room=room,
+            new_room=new_room,
+            config_path=_app_config_path(),
+        )
+        if result.get("ok", False):
+            updated = int(result.get("updated", 0) or 0)
+            if updated <= 0:
+                st.info("No room rename changes detected.")
+                return
+            _push_undo_snapshot(snapshot)
+            _set_structure_selection(
+                build_room_selection(
+                    day_label=day_label,
+                    room=new_room,
+                )
+            )
+            _refresh_state(f"Renamed room to {new_room} for {day_label} ({updated} session(s)).")
+            st.rerun()
+        st.error(str(result.get("error", "Failed to rename room for day.")))
+
+    st.markdown("---")
     st.caption("Add Room Sessions For Selected Day Blocks")
     day_block_signature_to_label: Dict[str, str] = {}
     for session in state.all_sessions:
@@ -1138,15 +1181,24 @@ def _render_structure_tab(state) -> None:
     if not day_options:
         day_options = ["Day 1"]
 
-    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns([1.8, 2.4, 1.2, 2.2])
+    filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.7, 0.9, 2.1, 1.2, 2.1])
     day_pick = filter_col1.selectbox("Day", day_options, key="structure_day_filter")
-    status_pick = filter_col3.selectbox(
+    filter_col2.caption("Manage days")
+    if filter_col2.button(
+        "Add/Delete days",
+        key="structure_day_tools_toggle",
+        use_container_width=True,
+        help="Open day operations for clone, clear, delete, or relabel.",
+    ):
+        st.session_state.structure_day_tools_open = not bool(st.session_state.get("structure_day_tools_open", False))
+        st.rerun()
+    status_pick = filter_col4.selectbox(
         "Status",
         options=["all", "active", "inactive"],
         format_func=lambda value: value.title(),
         key="structure_status_filter",
     )
-    search_text = filter_col4.text_input("Search SessionCode/Room", "", key="structure_search")
+    search_text = filter_col5.text_input("Search SessionCode/Room", "", key="structure_search")
     block_options = block_filter_labels_for_day(
         all_sessions,
         day_label=day_pick,
@@ -1159,12 +1211,177 @@ def _render_structure_tab(state) -> None:
         st.session_state.structure_block_filter = block_options[0]
         current_block = block_options[0]
     block_index = block_options.index(current_block) if current_block in block_options else 0
-    block_pick = filter_col2.selectbox(
+    block_pick = filter_col3.selectbox(
         "Block (optional)",
         options=block_options,
         index=block_index,
         key="structure_block_filter",
     )
+
+    day_sessions = [session for session in all_sessions if _normalize_text(session.day_label) == day_pick]
+    day_rooms = sorted(
+        {_normalize_text(session.room) for session in day_sessions if _normalize_text(session.room)},
+        key=room_sort_key,
+    )
+
+    resolved_day_num = int(config.day_to_num.get(day_pick, 0))
+    if resolved_day_num <= 0 and day_sessions:
+        resolved_day_num = int(getattr(day_sessions[0], "day_num", 0) or 0)
+
+    if bool(st.session_state.get("structure_day_tools_open", False)):
+        with st.container(border=True):
+            st.markdown("**Add/Delete days**")
+            day_action = st.selectbox(
+                "Action",
+                options=["Clone Day", "Clear Day", "Delete Day", "Relabel Day"],
+                key="structure_day_action_pick",
+            )
+
+            if day_action == "Clone Day":
+                clone_col1, clone_col2, clone_col3 = st.columns([1.6, 2.2, 1.2])
+                source_day = clone_col1.selectbox(
+                    "Source day",
+                    options=day_options,
+                    index=day_options.index(day_pick) if day_pick in day_options else 0,
+                    key="structure_day_clone_source",
+                )
+                target_day_label = clone_col2.text_input(
+                    "Target day label",
+                    value=f"{source_day} Copy",
+                    key="structure_day_clone_target_label",
+                )
+                source_day_num = int(config.day_to_num.get(source_day, 0))
+                if source_day_num <= 0 and source_day in day_options:
+                    source_day_sessions = [
+                        session for session in all_sessions if _normalize_text(session.day_label) == source_day
+                    ]
+                    if source_day_sessions:
+                        source_day_num = int(getattr(source_day_sessions[0], "day_num", 0) or 0)
+                target_day_num = clone_col3.number_input(
+                    "Target day #",
+                    min_value=1,
+                    max_value=99,
+                    value=max(1, source_day_num),
+                    step=1,
+                    key="structure_day_clone_target_num",
+                )
+                if st.button("Apply Clone Day", key="structure_day_clone_submit", use_container_width=True):
+                    snapshot = _snapshot_for_undo()
+                    result = clone_day_structure(
+                        source_day_label=source_day,
+                        target_day_label=_normalize_text(target_day_label),
+                        target_day_num=int(target_day_num),
+                        config_path=_app_config_path(),
+                    )
+                    if result.get("ok", False):
+                        created = int(result.get("created", 0) or 0)
+                        skipped_active = int(result.get("skipped_active", 0) or 0)
+                        skipped_inactive = int(result.get("skipped_inactive", 0) or 0)
+                        if created > 0:
+                            _push_undo_snapshot(snapshot)
+                        _refresh_state(
+                            f"Clone day complete. Created {created}, skipped active {skipped_active}, skipped inactive {skipped_inactive}."
+                        )
+                        st.rerun()
+                    st.error(str(result.get("error", "Failed to clone day structure.")))
+
+            elif day_action == "Clear Day":
+                confirm_clear_day = st.checkbox(
+                    f"Confirm clear all papers assigned on {day_pick}",
+                    key="structure_day_clear_confirm",
+                )
+                if st.button(
+                    "Apply Clear Day",
+                    key="structure_day_clear_submit",
+                    use_container_width=True,
+                    disabled=not confirm_clear_day,
+                ):
+                    snapshot = _snapshot_for_undo()
+                    result = clear_day_sessions(
+                        day_label=day_pick,
+                        session_structure_path=SESSION_STRUCTURE_FILE,
+                        paper_placements_path=PAPER_PLACEMENTS_FILE,
+                    )
+                    if result.get("ok", False):
+                        moved = int(result.get("moved_to_unassigned", 0) or 0)
+                        if moved > 0:
+                            _push_undo_snapshot(snapshot)
+                        _refresh_state(f"Cleared day {day_pick}; moved {moved} paper(s) to unassigned.")
+                        st.rerun()
+                    st.error(str(result.get("error", "Failed to clear day sessions.")))
+
+            elif day_action == "Delete Day":
+                confirm_delete_day = st.checkbox(
+                    f"Confirm delete all sessions for {day_pick}",
+                    key="structure_day_delete_confirm",
+                )
+                if st.button(
+                    "Apply Delete Day",
+                    key="structure_day_delete_submit",
+                    use_container_width=True,
+                    disabled=not confirm_delete_day,
+                ):
+                    snapshot = _snapshot_for_undo()
+                    result = delete_day_sessions(
+                        day_label=day_pick,
+                        session_structure_path=SESSION_STRUCTURE_FILE,
+                        paper_placements_path=PAPER_PLACEMENTS_FILE,
+                    )
+                    if result.get("ok", False):
+                        deleted = int(result.get("deleted", 0) or 0)
+                        moved = int(result.get("moved_to_unassigned", 0) or 0)
+                        if deleted > 0 or moved > 0:
+                            _push_undo_snapshot(snapshot)
+                        _clear_structure_selection()
+                        _refresh_state(f"Deleted day {day_pick}; removed {deleted} sessions and unassigned {moved} paper(s).")
+                        st.rerun()
+                    st.error(str(result.get("error", "Failed to delete day sessions.")))
+
+            else:
+                relabel_col1, relabel_col2 = st.columns([2.2, 1.2])
+                new_day_label = relabel_col1.text_input(
+                    "New day label",
+                    value=day_pick,
+                    key="structure_day_relabel_label",
+                )
+                new_day_num = relabel_col2.number_input(
+                    "New day #",
+                    min_value=1,
+                    max_value=99,
+                    value=max(1, resolved_day_num or 1),
+                    step=1,
+                    key="structure_day_relabel_num",
+                )
+                confirm_relabel_day = st.checkbox(
+                    f"Confirm relabel all sessions from {day_pick}",
+                    key="structure_day_relabel_confirm",
+                )
+                if st.button(
+                    "Apply Relabel Day",
+                    key="structure_day_relabel_submit",
+                    use_container_width=True,
+                    disabled=not confirm_relabel_day,
+                ):
+                    snapshot = _snapshot_for_undo()
+                    result = relabel_day_sessions(
+                        day_label=day_pick,
+                        new_day_label=_normalize_text(new_day_label),
+                        new_day_num=int(new_day_num),
+                        session_structure_path=SESSION_STRUCTURE_FILE,
+                        session_name_overrides_path=SESSION_NAME_OVERRIDES_FILE,
+                        config_path=_app_config_path(),
+                    )
+                    if result.get("ok", False):
+                        updated = int(result.get("updated", 0) or 0)
+                        migrated_overrides = int(result.get("migrated_overrides", 0) or 0)
+                        if updated > 0:
+                            _push_undo_snapshot(snapshot)
+                        _clear_structure_selection()
+                        _refresh_state(
+                            f"Relabeled day to {_normalize_text(new_day_label)} (#{int(new_day_num)}); updated {updated} sessions, migrated {migrated_overrides} title override(s)."
+                        )
+                        st.rerun()
+                    st.error(str(result.get("error", "Failed to relabel day sessions.")))
 
     matrix_data = group_sessions_for_structure_matrix(
         all_sessions,
@@ -1254,6 +1471,127 @@ def _render_structure_tab(state) -> None:
             )
     else:
         _render_matrix()
+
+    st.markdown("---")
+    add_row_col1, add_row_col2 = st.columns([1.1, 3.9])
+    if add_row_col1.button(
+        "Add session",
+        key=f"structure_add_row_toggle_{day_pick}",
+        use_container_width=True,
+        help="Append a new full row of sessions for all rooms in the selected day.",
+    ):
+        st.session_state.structure_add_row_open = not bool(st.session_state.get("structure_add_row_open", False))
+        st.rerun()
+    add_row_col2.caption("Append one new block row across every room in this day.")
+
+    if bool(st.session_state.get("structure_add_row_open", False)):
+        with st.container(border=True):
+            st.markdown("**Add session**")
+            if not day_rooms:
+                st.info(f"No rooms found for {day_pick}. Add a room first.")
+            else:
+                max_block_num = max([int(getattr(session, "block_num", 0) or 0) for session in day_sessions] + [0])
+                default_block_num = max(1, max_block_num + 1)
+                default_block_label = f"SESSION {default_block_num}"
+                anchor_session = max(
+                    day_sessions,
+                    key=lambda session: (
+                        int(getattr(session, "block_num", 0) or 0),
+                        int(getattr(session, "start_min", parse_start_minutes(_normalize_text(getattr(session, "time", "")))) or 0),
+                    ),
+                )
+                default_start_min = int(
+                    getattr(
+                        anchor_session,
+                        "start_min",
+                        parse_start_minutes(_normalize_text(getattr(anchor_session, "time", ""))),
+                    )
+                    or 0
+                )
+                anchor_end = int(
+                    getattr(anchor_session, "end_min", default_start_min + int(config.structure.default_session_duration_min))
+                    or (default_start_min + int(config.structure.default_session_duration_min))
+                )
+                default_duration = max(1, anchor_end - default_start_min)
+                capacity_samples = [
+                    int(getattr(session, "capacity", config.structure.default_session_capacity) or config.structure.default_session_capacity)
+                    for session in day_sessions
+                ]
+                if capacity_samples:
+                    default_capacity = max(sorted(set(capacity_samples)), key=capacity_samples.count)
+                else:
+                    default_capacity = int(config.structure.default_session_capacity)
+
+                with st.form(f"structure_add_row_form_{day_pick}", clear_on_submit=False):
+                    row_col1, row_col2, row_col3, row_col4 = st.columns([1.0, 2.0, 1.2, 1.1])
+                    block_num_value = row_col1.number_input(
+                        "Block #",
+                        min_value=1,
+                        max_value=99,
+                        value=default_block_num,
+                        step=1,
+                        key=f"structure_add_row_block_num_{day_pick}",
+                    )
+                    block_label_value = row_col2.text_input(
+                        "Block label",
+                        value=default_block_label,
+                        key=f"structure_add_row_block_label_{day_pick}",
+                    )
+                    start_time_value = row_col3.text_input(
+                        "Start (HH:MM)",
+                        value=minutes_to_clock(default_start_min),
+                        key=f"structure_add_row_start_{day_pick}",
+                    )
+                    duration_value = row_col4.number_input(
+                        "Duration (min)",
+                        min_value=1,
+                        max_value=360,
+                        value=int(default_duration),
+                        step=5,
+                        key=f"structure_add_row_duration_{day_pick}",
+                    )
+                    capacity_value = st.number_input(
+                        "Capacity",
+                        min_value=1,
+                        max_value=20,
+                        value=int(default_capacity),
+                        step=1,
+                        key=f"structure_add_row_capacity_{day_pick}",
+                    )
+                    create_row_submit = st.form_submit_button("Create Row", use_container_width=True)
+                    if create_row_submit:
+                        snapshot = _snapshot_for_undo()
+                        start_min_value = parse_clock_minutes(start_time_value, default=default_start_min)
+                        result = add_block_row_sessions(
+                            day_label=day_pick,
+                            block_label=_normalize_text(block_label_value),
+                            block_num=int(block_num_value),
+                            start_min=int(start_min_value),
+                            duration_min=int(duration_value),
+                            capacity=int(capacity_value),
+                            config_path=_app_config_path(),
+                        )
+                        if result.get("ok", False):
+                            created = int(result.get("created", 0) or 0)
+                            skipped_active = int(result.get("skipped_active", 0) or 0)
+                            skipped_inactive = int(result.get("skipped_inactive", 0) or 0)
+                            if created > 0:
+                                _push_undo_snapshot(snapshot)
+                            _refresh_state(
+                                f"Row add complete. Created {created}, skipped active {skipped_active}, skipped inactive {skipped_inactive}."
+                            )
+                            st.session_state.structure_add_row_open = False
+                            st.rerun()
+                        st.error(str(result.get("error", "Failed to create row sessions.")))
+
+    show_advanced_tools = st.toggle(
+        "Show advanced structure tools",
+        value=False,
+        key="structure_show_advanced_tools",
+        help="Enable table editor and secondary structure tools only when needed.",
+    )
+    if not show_advanced_tools:
+        return
 
     session_rows = list(load_session_structure_rows(SESSION_STRUCTURE_FILE).values())
     session_rows = sorted(

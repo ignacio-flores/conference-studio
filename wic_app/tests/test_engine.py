@@ -24,15 +24,22 @@ from reclassification_engine import (
     SESSION_STRUCTURE_FILE,
     SUBMISSIONS_FILE,
     add_room_session,
+    add_block_row_sessions,
     build_programme_state,
     bulk_add_room_sessions,
+    clear_day_sessions,
     clear_session,
+    clone_day_structure,
     create_manual_talk,
     create_session,
+    delete_day_sessions,
     load_paper_placements,
     load_paper_metadata_overrides,
     load_session_structure_rows,
+    load_session_name_overrides,
     parse_programme_slots,
+    relabel_day_sessions,
+    rename_room_for_day,
     remove_session,
     restore_session,
     update_session_structure_row,
@@ -553,6 +560,350 @@ class EngineTests(unittest.TestCase):
             self.assertNotIn(sid, state_after.validations.get("missing_submission_ids", []))
             self.assertGreaterEqual(int(state_after.validations.get("inactive_assigned_papers", 0) or 0), 1)
             self.assertIn(sid, state_after.validations.get("inactive_assigned_submission_ids", []))
+
+    def test_rename_room_for_day_success_and_collision_rejection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            rows = load_session_structure_rows(paths["structure"])
+            active_rows = [
+                row
+                for row in rows.values()
+                if str(row.get("Status", "active")).strip().lower() == "active"
+            ]
+            grouped: dict[tuple[str, str], list[dict[str, str]]] = {}
+            for row in active_rows:
+                key = (str(row.get("DayLabel", "")).strip(), str(row.get("TimeLabel", "")).strip())
+                grouped.setdefault(key, []).append(row)
+
+            collision_group = next(
+                (
+                    (key, group)
+                    for key, group in grouped.items()
+                    if key[0] and key[1] and len({str(item.get("Room", "")).strip() for item in group}) >= 2
+                ),
+                None,
+            )
+            self.assertIsNotNone(collision_group)
+            (day_label, _), group_rows = collision_group
+            room_a = str(group_rows[0].get("Room", "")).strip()
+            room_b = str(group_rows[1].get("Room", "")).strip()
+
+            collision_result = rename_room_for_day(
+                day_label=day_label,
+                room=room_a,
+                new_room=room_b,
+                session_structure_path=paths["structure"],
+            )
+            self.assertFalse(collision_result.get("ok", False))
+
+            existing_rooms = {
+                str(row.get("Room", "")).strip()
+                for row in rows.values()
+                if str(row.get("DayLabel", "")).strip() == day_label
+            }
+            renamed_room = f"{room_a}-RENAMED"
+            suffix = 2
+            while renamed_room in existing_rooms:
+                renamed_room = f"{room_a}-RENAMED-{suffix}"
+                suffix += 1
+
+            rename_result = rename_room_for_day(
+                day_label=day_label,
+                room=room_a,
+                new_room=renamed_room,
+                session_structure_path=paths["structure"],
+            )
+            self.assertTrue(rename_result.get("ok", False))
+            self.assertGreater(int(rename_result.get("updated", 0) or 0), 0)
+
+            rows_after = load_session_structure_rows(paths["structure"])
+            updated_rows = [
+                row
+                for row in rows_after.values()
+                if str(row.get("DayLabel", "")).strip() == day_label
+                and str(row.get("Room", "")).strip() == renamed_room
+            ]
+            self.assertGreaterEqual(len(updated_rows), int(rename_result.get("updated", 0) or 0))
+
+    def test_add_block_row_sessions_creates_for_all_day_rooms_and_skips_on_rerun(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            rows = load_session_structure_rows(paths["structure"])
+            day_label = next((str(row.get("DayLabel", "")).strip() for row in rows.values() if str(row.get("DayLabel", "")).strip()), "")
+            self.assertTrue(day_label)
+            day_rows = [row for row in rows.values() if str(row.get("DayLabel", "")).strip() == day_label]
+            day_rooms = {
+                str(row.get("Room", "")).strip()
+                for row in day_rows
+                if str(row.get("Room", "")).strip()
+            }
+            self.assertTrue(day_rooms)
+
+            max_end = max([int(str(row.get("EndMin", "0") or "0")) for row in day_rows] + [8 * 60])
+            max_block = max([int(str(row.get("BlockNum", "0") or "0")) for row in day_rows] + [0])
+            first_result = add_block_row_sessions(
+                day_label=day_label,
+                block_label=f"SESSION {max_block + 1}",
+                block_num=max_block + 1,
+                start_min=max_end + 15,
+                duration_min=90,
+                capacity=4,
+                session_structure_path=paths["structure"],
+            )
+            self.assertTrue(first_result.get("ok", False))
+            created_first = int(first_result.get("created", 0) or 0)
+            self.assertEqual(created_first, len(day_rooms))
+
+            second_result = add_block_row_sessions(
+                day_label=day_label,
+                block_label=f"SESSION {max_block + 1}",
+                block_num=max_block + 1,
+                start_min=max_end + 15,
+                duration_min=90,
+                capacity=4,
+                session_structure_path=paths["structure"],
+            )
+            self.assertTrue(second_result.get("ok", False))
+            self.assertEqual(int(second_result.get("created", 0) or 0), 0)
+            self.assertGreaterEqual(int(second_result.get("skipped_active", 0) or 0), len(day_rooms))
+
+    def test_clear_day_sessions_unassigns_papers_and_keeps_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            rows_before = load_session_structure_rows(paths["structure"])
+            placements_before = load_paper_placements(paths["placements"])
+            session_to_day = {
+                str(row.get("SessionId", "")).strip(): str(row.get("DayLabel", "")).strip()
+                for row in rows_before.values()
+            }
+            affected_by_day: dict[str, list[str]] = {}
+            for sid, placement in placements_before.items():
+                status = str(placement.get("PlacementStatus", "")).strip().lower()
+                if status not in {"scheduled", "overflow"}:
+                    continue
+                session_id = str(placement.get("SessionId", "")).strip()
+                day_label = session_to_day.get(session_id, "")
+                if not day_label:
+                    continue
+                affected_by_day.setdefault(day_label, []).append(sid)
+
+            target_day = next((day for day, submission_ids in affected_by_day.items() if submission_ids), "")
+            self.assertTrue(target_day)
+            day_rows_before = [
+                row for row in rows_before.values() if str(row.get("DayLabel", "")).strip() == target_day
+            ]
+
+            result = clear_day_sessions(
+                day_label=target_day,
+                session_structure_path=paths["structure"],
+                paper_placements_path=paths["placements"],
+            )
+            self.assertTrue(result.get("ok", False))
+            self.assertGreater(int(result.get("moved_to_unassigned", 0) or 0), 0)
+
+            rows_after = load_session_structure_rows(paths["structure"])
+            day_rows_after = [
+                row for row in rows_after.values() if str(row.get("DayLabel", "")).strip() == target_day
+            ]
+            self.assertEqual(len(day_rows_before), len(day_rows_after))
+
+            placements_after = load_paper_placements(paths["placements"])
+            for sid in affected_by_day[target_day]:
+                updated = placements_after[sid]
+                self.assertEqual(str(updated.get("PlacementStatus", "")).strip().lower(), "unassigned")
+                self.assertEqual(str(updated.get("SessionId", "")).strip(), "")
+
+    def test_delete_day_sessions_unassigns_and_removes_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            rows_before = load_session_structure_rows(paths["structure"])
+            placements_before = load_paper_placements(paths["placements"])
+            session_to_day = {
+                str(row.get("SessionId", "")).strip(): str(row.get("DayLabel", "")).strip()
+                for row in rows_before.values()
+            }
+            day_scores: dict[str, int] = {}
+            for placement in placements_before.values():
+                status = str(placement.get("PlacementStatus", "")).strip().lower()
+                if status not in {"scheduled", "overflow"}:
+                    continue
+                session_id = str(placement.get("SessionId", "")).strip()
+                day_label = session_to_day.get(session_id, "")
+                if not day_label:
+                    continue
+                day_scores[day_label] = day_scores.get(day_label, 0) + 1
+
+            target_day = next(iter(day_scores.keys()), "")
+            self.assertTrue(target_day)
+            deleted_session_ids = {
+                str(row.get("SessionId", "")).strip()
+                for row in rows_before.values()
+                if str(row.get("DayLabel", "")).strip() == target_day
+            }
+            affected_submissions = [
+                sid
+                for sid, placement in placements_before.items()
+                if str(placement.get("SessionId", "")).strip() in deleted_session_ids
+                and str(placement.get("PlacementStatus", "")).strip().lower() in {"scheduled", "overflow"}
+            ]
+
+            result = delete_day_sessions(
+                day_label=target_day,
+                session_structure_path=paths["structure"],
+                paper_placements_path=paths["placements"],
+            )
+            self.assertTrue(result.get("ok", False))
+            self.assertEqual(int(result.get("deleted", 0) or 0), len(deleted_session_ids))
+
+            rows_after = load_session_structure_rows(paths["structure"])
+            self.assertFalse(
+                any(str(row.get("DayLabel", "")).strip() == target_day for row in rows_after.values())
+            )
+
+            placements_after = load_paper_placements(paths["placements"])
+            for sid in affected_submissions:
+                updated = placements_after[sid]
+                self.assertEqual(str(updated.get("PlacementStatus", "")).strip().lower(), "unassigned")
+                self.assertEqual(str(updated.get("SessionId", "")).strip(), "")
+
+    def test_relabel_day_sessions_rewrites_codes_and_migrates_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            rows_before = load_session_structure_rows(paths["structure"])
+            target_day = next((str(row.get("DayLabel", "")).strip() for row in rows_before.values() if str(row.get("DayLabel", "")).strip()), "")
+            self.assertTrue(target_day)
+            target_rows_before = [
+                row for row in rows_before.values() if str(row.get("DayLabel", "")).strip() == target_day
+            ]
+            self.assertTrue(target_rows_before)
+            old_code = str(target_rows_before[0].get("SessionCode", "")).strip()
+            self.assertTrue(old_code)
+
+            write_session_name_overrides({old_code: "Relabeled Session Title"}, paths["session_names"])
+
+            new_day_label = f"{target_day} (Relabeled)"
+            result = relabel_day_sessions(
+                day_label=target_day,
+                new_day_label=new_day_label,
+                new_day_num=88,
+                session_structure_path=paths["structure"],
+                session_name_overrides_path=paths["session_names"],
+            )
+            self.assertTrue(result.get("ok", False))
+            self.assertGreater(int(result.get("updated", 0) or 0), 0)
+
+            rows_after = load_session_structure_rows(paths["structure"])
+            relabeled_rows = [
+                row for row in rows_after.values() if str(row.get("DayLabel", "")).strip() == new_day_label
+            ]
+            self.assertEqual(len(relabeled_rows), len(target_rows_before))
+            relabeled_codes = [str(row.get("SessionCode", "")).strip() for row in relabeled_rows]
+            self.assertTrue(all(code.startswith("D88-B") for code in relabeled_codes))
+            self.assertEqual(len(relabeled_codes), len(set(relabeled_codes)))
+            self.assertTrue(all(str(row.get("DayNum", "")).strip() == "88" for row in relabeled_rows))
+
+            overrides_after = load_session_name_overrides(paths["session_names"])
+            self.assertNotIn(old_code, overrides_after)
+            self.assertIn("Relabeled Session Title", set(overrides_after.values()))
+
+    def test_clone_day_structure_skips_existing_slots_on_rerun(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            rows = load_session_structure_rows(paths["structure"])
+            source_day = next((str(row.get("DayLabel", "")).strip() for row in rows.values() if str(row.get("DayLabel", "")).strip()), "")
+            self.assertTrue(source_day)
+
+            first_result = clone_day_structure(
+                source_day_label=source_day,
+                target_day_label=f"{source_day} Clone",
+                target_day_num=91,
+                session_structure_path=paths["structure"],
+            )
+            self.assertTrue(first_result.get("ok", False))
+            first_created = int(first_result.get("created", 0) or 0)
+            self.assertGreater(first_created, 0)
+
+            second_result = clone_day_structure(
+                source_day_label=source_day,
+                target_day_label=f"{source_day} Clone",
+                target_day_num=91,
+                session_structure_path=paths["structure"],
+            )
+            self.assertTrue(second_result.get("ok", False))
+            self.assertEqual(int(second_result.get("created", 0) or 0), 0)
+            self.assertGreaterEqual(int(second_result.get("skipped_active", 0) or 0), first_created)
 
 
 if __name__ == "__main__":

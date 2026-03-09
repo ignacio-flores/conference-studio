@@ -245,7 +245,7 @@ def render_structure_matrix(
     with header_cols[-1]:
         new_room_selected = selected_kind == "new_room" and selected_day == day_label
         if st.button(
-            "+ Room",
+            "Add room",
             key=f"struct_room_new_{day_label}",
             type="primary" if new_room_selected else "secondary",
             use_container_width=True,

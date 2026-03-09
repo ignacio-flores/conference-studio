@@ -238,6 +238,17 @@ class StructureTabViewTests(unittest.TestCase):
         self.assertEqual(new_room_selection["day_label"], "Day 1")
         self.assertEqual(new_room_selection["room"], "")
 
+    def test_structure_tab_has_day_row_room_labels_and_lazy_advanced_gate(self) -> None:
+        app_text = (APP_ROOT / "app.py").read_text(encoding="utf-8")
+        structure_text = (APP_ROOT / "ui" / "structure.py").read_text(encoding="utf-8")
+        self.assertIn('"Manage days"', app_text)
+        self.assertIn('"Add/Delete days"', app_text)
+        self.assertIn('"Add session"', app_text)
+        self.assertIn('"Add room"', structure_text)
+        self.assertIn('key="structure_show_advanced_tools"', app_text)
+        self.assertIn("if not show_advanced_tools:", app_text)
+        self.assertIn("with st.expander(\"Advanced table editor\", expanded=False):", app_text)
+
 
 if __name__ == "__main__":
     unittest.main()

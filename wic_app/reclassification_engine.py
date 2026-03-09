@@ -1755,6 +1755,556 @@ def bulk_add_room_sessions(
     }
 
 
+def _resolve_day_num_for_label(
+    day_label: str,
+    rows: Dict[str, Dict[str, str]],
+    config: ConferenceConfig,
+) -> int:
+    day_label_clean = str(day_label).strip()
+    if not day_label_clean:
+        return 0
+
+    config_day_num = int(config.day_to_num.get(day_label_clean, 0))
+    if config_day_num > 0:
+        return config_day_num
+
+    for row in rows.values():
+        if str(row.get("DayLabel", "")).strip() != day_label_clean:
+            continue
+        parsed = _parse_positive_int(str(row.get("DayNum", "")).strip(), default=0)
+        if parsed > 0:
+            return parsed
+    return 0
+
+
+def _find_existing_session_for_slot(
+    rows: Dict[str, Dict[str, str]],
+    day_label: str,
+    time_label: str,
+    room: str,
+) -> Optional[Dict[str, str]]:
+    day_clean = str(day_label).strip()
+    time_clean = str(time_label).strip()
+    room_clean = str(room).strip()
+    best: Optional[Dict[str, str]] = None
+    for row in rows.values():
+        if (
+            str(row.get("DayLabel", "")).strip() != day_clean
+            or str(row.get("TimeLabel", "")).strip() != time_clean
+            or str(row.get("Room", "")).strip() != room_clean
+        ):
+            continue
+        if best is None:
+            best = row
+            continue
+        if str(row.get("Status", "active")).strip().lower() == "active":
+            best = row
+    return best
+
+
+def rename_room_for_day(
+    day_label: str,
+    room: str,
+    new_room: str,
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    config_path: Optional[Path] = None,
+) -> Dict[str, object]:
+    day_label_clean = str(day_label).strip()
+    room_clean = str(room).strip()
+    new_room_clean = str(new_room).strip()
+    if not day_label_clean or not room_clean or not new_room_clean:
+        return {"ok": False, "error": "Day label, room, and new room are required."}
+
+    rows = load_session_structure_rows(session_structure_path)
+    matched_ids = [
+        session_id
+        for session_id, row in rows.items()
+        if str(row.get("DayLabel", "")).strip() == day_label_clean
+        and str(row.get("Room", "")).strip() == room_clean
+    ]
+    if not matched_ids:
+        return {"ok": False, "error": f"No sessions found for {day_label_clean} / {room_clean}."}
+
+    if room_clean == new_room_clean:
+        return {"ok": True, "updated": 0, "updated_session_ids": [], "errors": []}
+
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    updated_ids: List[str] = []
+    for session_id in matched_ids:
+        row = dict(rows[session_id])
+        row["Room"] = new_room_clean
+        row["UpdatedAt"] = now
+        rows[session_id] = row
+        updated_ids.append(session_id)
+
+    config = load_conference_config(config_path)
+    validation_errors = validate_session_structure_rows(rows.values(), config)
+    if validation_errors:
+        return {"ok": False, "error": validation_errors[0], "errors": validation_errors}
+
+    write_session_structure_rows(rows.values(), session_structure_path)
+    return {
+        "ok": True,
+        "updated": len(updated_ids),
+        "updated_session_ids": sorted(updated_ids),
+        "errors": [],
+    }
+
+
+def add_block_row_sessions(
+    day_label: str,
+    block_label: str,
+    start_min: int,
+    duration_min: int,
+    capacity: int,
+    block_num: Optional[int] = None,
+    source: str = "manual",
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    config_path: Optional[Path] = None,
+) -> Dict[str, object]:
+    day_label_clean = str(day_label).strip()
+    if not day_label_clean:
+        return {"ok": False, "error": "Day label is required."}
+
+    config = load_conference_config(config_path)
+    rows = load_session_structure_rows(session_structure_path)
+    day_rows = [
+        row
+        for row in rows.values()
+        if str(row.get("DayLabel", "")).strip() == day_label_clean and str(row.get("Room", "")).strip()
+    ]
+    if not day_rows:
+        return {"ok": False, "error": f"No day sessions found for {day_label_clean}."}
+
+    rooms = sorted({str(row.get("Room", "")).strip() for row in day_rows if str(row.get("Room", "")).strip()}, key=room_sort_key)
+    if not rooms:
+        return {"ok": False, "error": f"No rooms found for {day_label_clean}."}
+
+    resolved_day_num = _resolve_day_num_for_label(day_label_clean, rows, config)
+    if resolved_day_num <= 0:
+        return {"ok": False, "error": f"Unable to resolve day number for {day_label_clean}."}
+
+    max_block_num = max(
+        _parse_positive_int(str(row.get("BlockNum", "")).strip(), default=0)
+        for row in day_rows
+    )
+    resolved_block_num = int(block_num) if block_num is not None else max_block_num + 1
+    if resolved_block_num <= 0:
+        resolved_block_num = max(1, max_block_num + 1)
+
+    start_min_resolved = _parse_nonnegative_int(str(start_min), default=0)
+    duration_resolved = max(
+        1,
+        _parse_positive_int(str(duration_min), default=config.structure.default_session_duration_min),
+    )
+    end_min_resolved = start_min_resolved + duration_resolved
+    time_label = build_time_label(start_min_resolved, end_min_resolved)
+    block_label_clean = str(block_label).strip() or f"SESSION {resolved_block_num}"
+    capacity_resolved = _parse_positive_int(str(capacity), default=config.structure.default_session_capacity)
+    source_clean = str(source).strip() or "manual"
+
+    active_codes = {
+        str(row.get("SessionCode", "")).strip()
+        for row in rows.values()
+        if str(row.get("Status", "active")).strip().lower() == "active" and str(row.get("SessionCode", "")).strip()
+    }
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    created_codes: List[str] = []
+    skipped_active: List[str] = []
+    skipped_inactive: List[str] = []
+
+    for room_name in rooms:
+        existing = _find_existing_session_for_slot(rows, day_label_clean, time_label, room_name)
+        if existing is not None:
+            status = str(existing.get("Status", "active")).strip().lower()
+            existing_code = str(existing.get("SessionCode", "")).strip() or str(existing.get("SessionId", "")).strip()
+            if status == "active":
+                skipped_active.append(existing_code)
+            else:
+                skipped_inactive.append(existing_code)
+            continue
+
+        base_code = _default_session_code(resolved_day_num, resolved_block_num, room_name)
+        session_code = base_code
+        if config.structure.enforce_unique_session_code and session_code in active_codes:
+            session_code = _next_available_session_code(base_code, active_codes)
+
+        session_id = str(uuid.uuid4())
+        rows[session_id] = {
+            "SessionId": session_id,
+            "SessionCode": session_code,
+            "Status": "active",
+            "DayLabel": day_label_clean,
+            "DayNum": str(resolved_day_num),
+            "BlockLabel": block_label_clean,
+            "BlockNum": str(resolved_block_num),
+            "TimeLabel": time_label,
+            "StartMin": str(start_min_resolved),
+            "EndMin": str(end_min_resolved),
+            "Room": room_name,
+            "Capacity": str(capacity_resolved),
+            "Source": source_clean,
+            "UpdatedAt": now,
+        }
+        active_codes.add(session_code)
+        created_codes.append(session_code)
+
+    if not created_codes:
+        return {
+            "ok": True,
+            "created": 0,
+            "created_codes": [],
+            "skipped_active": len(skipped_active),
+            "skipped_active_codes": sorted(skipped_active),
+            "skipped_inactive": len(skipped_inactive),
+            "skipped_inactive_codes": sorted(skipped_inactive),
+            "errors": [],
+        }
+
+    validation_errors = validate_session_structure_rows(rows.values(), config)
+    if validation_errors:
+        return {"ok": False, "error": validation_errors[0], "errors": validation_errors}
+
+    write_session_structure_rows(rows.values(), session_structure_path)
+    return {
+        "ok": True,
+        "created": len(created_codes),
+        "created_codes": sorted(created_codes),
+        "skipped_active": len(skipped_active),
+        "skipped_active_codes": sorted(skipped_active),
+        "skipped_inactive": len(skipped_inactive),
+        "skipped_inactive_codes": sorted(skipped_inactive),
+        "errors": [],
+    }
+
+
+def clone_day_structure(
+    source_day_label: str,
+    target_day_label: str,
+    target_day_num: Optional[int] = None,
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    config_path: Optional[Path] = None,
+) -> Dict[str, object]:
+    source_day_clean = str(source_day_label).strip()
+    target_day_clean = str(target_day_label).strip()
+    if not source_day_clean or not target_day_clean:
+        return {"ok": False, "error": "Source and target day labels are required."}
+
+    config = load_conference_config(config_path)
+    rows = load_session_structure_rows(session_structure_path)
+    source_rows = [
+        row
+        for row in rows.values()
+        if str(row.get("DayLabel", "")).strip() == source_day_clean
+        and str(row.get("Status", "active")).strip().lower() == "active"
+    ]
+    if not source_rows:
+        return {"ok": False, "error": f"No active sessions found for source day {source_day_clean}."}
+
+    resolved_target_day_num = int(target_day_num) if target_day_num is not None else 0
+    if resolved_target_day_num <= 0:
+        resolved_target_day_num = _resolve_day_num_for_label(target_day_clean, rows, config)
+    if resolved_target_day_num <= 0:
+        return {"ok": False, "error": f"Unable to resolve target day number for {target_day_clean}."}
+
+    active_codes = {
+        str(row.get("SessionCode", "")).strip()
+        for row in rows.values()
+        if str(row.get("Status", "active")).strip().lower() == "active" and str(row.get("SessionCode", "")).strip()
+    }
+    created_codes: List[str] = []
+    skipped_active: List[str] = []
+    skipped_inactive: List[str] = []
+    errors: List[str] = []
+    now = datetime.utcnow().isoformat(timespec="seconds")
+
+    ordered_source_rows = sorted(
+        source_rows,
+        key=lambda row: (
+            _parse_positive_int(str(row.get("BlockNum", "")).strip(), default=0),
+            _parse_nonnegative_int(str(row.get("StartMin", "")).strip(), default=0),
+            room_sort_key(str(row.get("Room", "")).strip()),
+        ),
+    )
+    for row in ordered_source_rows:
+        block_num = _parse_positive_int(str(row.get("BlockNum", "")).strip(), default=0)
+        block_label = str(row.get("BlockLabel", "")).strip()
+        time_label = str(row.get("TimeLabel", "")).strip()
+        start_min = _parse_nonnegative_int(str(row.get("StartMin", "")).strip(), default=parse_start_minutes(time_label))
+        end_min = _parse_positive_int(
+            str(row.get("EndMin", "")).strip(),
+            default=max(start_min + 1, parse_end_minutes(time_label, default_duration=config.structure.default_session_duration_min)),
+        )
+        if end_min <= start_min:
+            end_min = start_min + max(1, int(config.structure.default_session_duration_min))
+        room = str(row.get("Room", "")).strip()
+        if not time_label or not room or block_num <= 0:
+            errors.append(f"Skipped invalid source row with room/time/block: {row.get('SessionId', '')}")
+            continue
+
+        existing = _find_existing_session_for_slot(rows, target_day_clean, time_label, room)
+        if existing is not None:
+            status = str(existing.get("Status", "active")).strip().lower()
+            existing_code = str(existing.get("SessionCode", "")).strip() or str(existing.get("SessionId", "")).strip()
+            if status == "active":
+                skipped_active.append(existing_code)
+            else:
+                skipped_inactive.append(existing_code)
+            continue
+
+        base_code = _default_session_code(resolved_target_day_num, block_num, room)
+        session_code = base_code
+        if config.structure.enforce_unique_session_code and session_code in active_codes:
+            session_code = _next_available_session_code(base_code, active_codes)
+
+        session_id = str(uuid.uuid4())
+        rows[session_id] = {
+            "SessionId": session_id,
+            "SessionCode": session_code,
+            "Status": "active",
+            "DayLabel": target_day_clean,
+            "DayNum": str(resolved_target_day_num),
+            "BlockLabel": block_label,
+            "BlockNum": str(block_num),
+            "TimeLabel": time_label,
+            "StartMin": str(start_min),
+            "EndMin": str(end_min),
+            "Room": room,
+            "Capacity": str(
+                _parse_positive_int(
+                    str(row.get("Capacity", "")).strip(),
+                    default=config.structure.default_session_capacity,
+                )
+            ),
+            "Source": str(row.get("Source", "")).strip() or "manual",
+            "UpdatedAt": now,
+        }
+        active_codes.add(session_code)
+        created_codes.append(session_code)
+
+    if not created_codes and not errors:
+        return {
+            "ok": True,
+            "created": 0,
+            "created_codes": [],
+            "skipped_active": len(skipped_active),
+            "skipped_active_codes": sorted(skipped_active),
+            "skipped_inactive": len(skipped_inactive),
+            "skipped_inactive_codes": sorted(skipped_inactive),
+            "errors": [],
+        }
+
+    validation_errors = validate_session_structure_rows(rows.values(), config)
+    if validation_errors:
+        return {"ok": False, "error": validation_errors[0], "errors": validation_errors}
+
+    write_session_structure_rows(rows.values(), session_structure_path)
+    return {
+        "ok": True,
+        "created": len(created_codes),
+        "created_codes": sorted(created_codes),
+        "skipped_active": len(skipped_active),
+        "skipped_active_codes": sorted(skipped_active),
+        "skipped_inactive": len(skipped_inactive),
+        "skipped_inactive_codes": sorted(skipped_inactive),
+        "errors": errors,
+    }
+
+
+def clear_day_sessions(
+    day_label: str,
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    paper_placements_path: Path = PAPER_PLACEMENTS_FILE,
+) -> Dict[str, object]:
+    day_label_clean = str(day_label).strip()
+    if not day_label_clean:
+        return {"ok": False, "error": "Day label is required."}
+
+    rows = load_session_structure_rows(session_structure_path)
+    target_session_ids = {
+        str(row.get("SessionId", "")).strip()
+        for row in rows.values()
+        if str(row.get("DayLabel", "")).strip() == day_label_clean
+    }
+    target_session_ids.discard("")
+    if not target_session_ids:
+        return {"ok": False, "error": f"No sessions found for day {day_label_clean}."}
+
+    placements = load_paper_placements(paper_placements_path)
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    moved = 0
+    for row in placements.values():
+        if str(row.get("SessionId", "")).strip() not in target_session_ids:
+            continue
+        status = str(row.get("PlacementStatus", "")).strip().lower()
+        if status not in {"scheduled", "overflow"}:
+            continue
+        row["PlacementStatus"] = "unassigned"
+        row["SessionId"] = ""
+        row["TalkIndex"] = ""
+        row["OverflowOrder"] = ""
+        row["UpdatedAt"] = now
+        moved += 1
+
+    if moved > 0:
+        write_paper_placements(placements.values(), paper_placements_path)
+
+    return {
+        "ok": True,
+        "updated": moved,
+        "moved_to_unassigned": moved,
+        "session_count": len(target_session_ids),
+    }
+
+
+def delete_day_sessions(
+    day_label: str,
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    paper_placements_path: Path = PAPER_PLACEMENTS_FILE,
+) -> Dict[str, object]:
+    day_label_clean = str(day_label).strip()
+    if not day_label_clean:
+        return {"ok": False, "error": "Day label is required."}
+
+    rows = load_session_structure_rows(session_structure_path)
+    removed_session_ids = {
+        session_id
+        for session_id, row in rows.items()
+        if str(row.get("DayLabel", "")).strip() == day_label_clean
+    }
+    if not removed_session_ids:
+        return {"ok": False, "error": f"No sessions found for day {day_label_clean}."}
+
+    remaining_rows = {session_id: row for session_id, row in rows.items() if session_id not in removed_session_ids}
+    placements = load_paper_placements(paper_placements_path)
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    moved = 0
+    for row in placements.values():
+        if str(row.get("SessionId", "")).strip() not in removed_session_ids:
+            continue
+        status = str(row.get("PlacementStatus", "")).strip().lower()
+        if status not in {"scheduled", "overflow"}:
+            continue
+        row["PlacementStatus"] = "unassigned"
+        row["SessionId"] = ""
+        row["TalkIndex"] = ""
+        row["OverflowOrder"] = ""
+        row["UpdatedAt"] = now
+        moved += 1
+
+    if moved > 0:
+        write_paper_placements(placements.values(), paper_placements_path)
+    write_session_structure_rows(remaining_rows.values(), session_structure_path)
+    return {
+        "ok": True,
+        "deleted": len(removed_session_ids),
+        "deleted_session_ids": sorted(removed_session_ids),
+        "moved_to_unassigned": moved,
+    }
+
+
+def relabel_day_sessions(
+    day_label: str,
+    new_day_label: str,
+    new_day_num: int,
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    session_name_overrides_path: Path = SESSION_NAME_OVERRIDES_FILE,
+    config_path: Optional[Path] = None,
+) -> Dict[str, object]:
+    day_label_clean = str(day_label).strip()
+    new_day_label_clean = str(new_day_label).strip()
+    resolved_new_day_num = _parse_positive_int(str(new_day_num), default=0)
+    if not day_label_clean or not new_day_label_clean or resolved_new_day_num <= 0:
+        return {"ok": False, "error": "Day label, new day label, and new day number are required."}
+
+    rows = load_session_structure_rows(session_structure_path)
+    target_ids = [
+        session_id
+        for session_id, row in rows.items()
+        if str(row.get("DayLabel", "")).strip() == day_label_clean
+    ]
+    if not target_ids:
+        return {"ok": False, "error": f"No sessions found for day {day_label_clean}."}
+
+    assigned_codes = {
+        str(row.get("SessionCode", "")).strip()
+        for session_id, row in rows.items()
+        if session_id not in target_ids and str(row.get("SessionCode", "")).strip()
+    }
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    ordered_target_ids = sorted(
+        target_ids,
+        key=lambda session_id: (
+            _parse_positive_int(str(rows[session_id].get("BlockNum", "")).strip(), default=0),
+            _parse_nonnegative_int(str(rows[session_id].get("StartMin", "")).strip(), default=0),
+            room_sort_key(str(rows[session_id].get("Room", "")).strip()),
+            str(rows[session_id].get("SessionId", "")).strip(),
+        ),
+    )
+
+    moved_overrides: List[Tuple[str, str]] = []
+    updated = 0
+    for session_id in ordered_target_ids:
+        row = dict(rows[session_id])
+        block_num = _parse_positive_int(
+            str(row.get("BlockNum", "")).strip(),
+            default=_parse_block_num_from_label(str(row.get("BlockLabel", "")).strip(), default=0),
+        )
+        room = str(row.get("Room", "")).strip()
+        base_code = _default_session_code(resolved_new_day_num, block_num, room)
+        new_code = base_code
+        if new_code in assigned_codes:
+            new_code = _next_available_session_code(base_code, assigned_codes)
+        assigned_codes.add(new_code)
+
+        old_code = str(row.get("SessionCode", "")).strip()
+        if old_code and old_code != new_code:
+            moved_overrides.append((old_code, new_code))
+
+        changed = (
+            str(row.get("DayLabel", "")).strip() != new_day_label_clean
+            or str(row.get("DayNum", "")).strip() != str(resolved_new_day_num)
+            or old_code != new_code
+        )
+        row["DayLabel"] = new_day_label_clean
+        row["DayNum"] = str(resolved_new_day_num)
+        row["SessionCode"] = new_code
+        if changed:
+            row["UpdatedAt"] = now
+            updated += 1
+        rows[session_id] = row
+
+    config = load_conference_config(config_path)
+    validation_errors = validate_session_structure_rows(rows.values(), config)
+    if validation_errors:
+        return {"ok": False, "error": validation_errors[0], "errors": validation_errors}
+
+    session_name_overrides = load_session_name_overrides(session_name_overrides_path)
+    migrated_overrides = 0
+    if moved_overrides and session_name_overrides:
+        rewritten_overrides = dict(session_name_overrides)
+        for old_code, new_code in moved_overrides:
+            title = str(session_name_overrides.get(old_code, "")).strip()
+            if not title:
+                continue
+            rewritten_overrides.pop(old_code, None)
+            rewritten_overrides[new_code] = title
+            migrated_overrides += 1
+    else:
+        rewritten_overrides = session_name_overrides
+
+    write_session_structure_rows(rows.values(), session_structure_path)
+    if migrated_overrides > 0:
+        write_session_name_overrides(rewritten_overrides, session_name_overrides_path)
+
+    return {
+        "ok": True,
+        "updated": updated,
+        "migrated_overrides": migrated_overrides,
+        "errors": [],
+    }
+
+
 def update_session_structure_row(
     session_id: str,
     updates: Dict[str, object],

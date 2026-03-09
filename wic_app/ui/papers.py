@@ -252,7 +252,6 @@ def render_paper_list_tab(
         st.session_state[edit_key] = ""
         edit_sid = ""
 
-    st.caption("Table view with Details editor. Hover presenter for abstract preview.")
     header_cols = st.columns([2.2, 3.2, 1.8, 1.2, 2.0, 0.8], gap="small")
     header_cols[0].markdown("**Presenter**")
     header_cols[1].markdown("**Title**")
