@@ -6,11 +6,20 @@ In Finder, double-click:
 
 - `Launch_WIC_Studio.command`
 
+On Linux, run:
+
+- `./Launch_WIC_Studio_Linux.sh`
+
 What it does automatically:
 
 1. Creates `.venv` if needed
 2. Installs dependencies when `wic_app/requirements.txt` changes
 3. Starts the Streamlit app
+
+Linux notes:
+
+- Uses `.venv_linux` (separate from `.venv`) to avoid cross-OS virtualenv issues.
+- If your distro disables `ensurepip`, the launcher auto-falls back to `--system-site-packages`.
 
 ## Folder layout
 
