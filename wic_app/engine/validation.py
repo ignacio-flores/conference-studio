@@ -17,6 +17,9 @@ def validate_programme_state(
     scheduled_ids = []
     overflow_ids = []
     overflow_by_session: Dict[str, list[str]] = {}
+    inactive_scheduled_ids = []
+    inactive_overflow_ids = []
+    inactive_overflow_by_session: Dict[str, list[str]] = {}
     incomplete_sessions: list[str] = []
     session_capacity_mismatch: list[str] = []
 
@@ -33,8 +36,16 @@ def validate_programme_state(
         if sum(1 for paper in session.papers if paper is not None) < capacity:
             incomplete_sessions.append(str(session.session_code))
 
+    for session in inactive_sessions:
+        for paper in session.papers:
+            if paper is not None:
+                inactive_scheduled_ids.append(paper.submission_id)
+        if session.overflow_papers:
+            inactive_overflow_by_session[session.session_code] = [p.submission_id for p in session.overflow_papers]
+            inactive_overflow_ids.extend(inactive_overflow_by_session[session.session_code])
+
     unassigned_ids = [paper.submission_id for paper in state.unassigned_papers]
-    accounted_ids = scheduled_ids + overflow_ids + unassigned_ids
+    accounted_ids = scheduled_ids + overflow_ids + inactive_scheduled_ids + inactive_overflow_ids + unassigned_ids
     id_counts = Counter(accounted_ids)
     duplicates = sorted([sid for sid, count in id_counts.items() if count > 1])
 
@@ -76,6 +87,10 @@ def validate_programme_state(
         "scheduled_papers": len(scheduled_ids),
         "overflow_papers": len(overflow_ids),
         "unassigned_papers": len(unassigned_ids),
+        "inactive_assigned_papers": len(inactive_scheduled_ids) + len(inactive_overflow_ids),
+        "inactive_assigned_submission_ids": sorted(set(inactive_scheduled_ids + inactive_overflow_ids)),
+        "inactive_overflow_papers": len(inactive_overflow_ids),
+        "inactive_overflow_by_session": inactive_overflow_by_session,
         "accounted_papers": len(accounted_ids),
         "duplicate_submission_ids": duplicates,
         "missing_submission_ids": missing,

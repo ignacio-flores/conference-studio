@@ -1,0 +1,31 @@
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+APP_ROOT = Path(__file__).resolve().parents[1]
+if str(APP_ROOT) not in sys.path:
+    sys.path.insert(0, str(APP_ROOT))
+
+
+class AppLayoutConfigTests(unittest.TestCase):
+    def test_uses_state_backed_navigation_instead_of_streamlit_tabs(self) -> None:
+        app_py = APP_ROOT / "app.py"
+        text = app_py.read_text(encoding="utf-8")
+        self.assertIn('APP_TITLE = "Conference Studio"', text)
+        self.assertIn('TAB_LABELS = ["Programme", "Structure", "Paper List", "Checks"]', text)
+        self.assertIn('key="active_tab"', text)
+        self.assertNotIn("st.tabs(", text)
+        self.assertNotIn("Programme-first mode: edits are auto-applied", text)
+        self.assertIn('DEFAULT_CONFERENCE_LABEL = "WIC 2026"', text)
+        self.assertIn("UI_SETTINGS_FILE", text)
+        self.assertIn("def _load_ui_settings()", text)
+        self.assertIn("def _save_conference_label", text)
+        self.assertIn("conference_label_draft", text)
+        self.assertIn('key="conference_title_edit_toggle"', text)
+        self.assertIn("pills_widget = getattr(st, \"pills\", None)", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

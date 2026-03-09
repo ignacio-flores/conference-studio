@@ -5,6 +5,31 @@ from typing import Callable, List
 import pandas as pd
 import streamlit as st
 
+PROGRAMME_COLUMN_OPTIONS = ["Auto", "1", "2", "3", "4", "5", "6"]
+
+
+def resolve_programme_layout_density(
+    max_rooms: int,
+    has_selection: bool,
+    columns_choice: str,
+) -> tuple[int, int]:
+    safe_max_rooms = max(1, int(max_rooms or 1))
+    width_budget = 960 if has_selection else 1450
+    choice = str(columns_choice or "Auto")
+
+    if choice == "Auto":
+        target = max(1, width_budget // 320)
+        rooms_per_row = min(safe_max_rooms, target)
+    else:
+        try:
+            rooms_per_row = max(1, int(choice))
+        except Exception:
+            rooms_per_row = safe_max_rooms
+        rooms_per_row = min(safe_max_rooms, rooms_per_row)
+
+    column_width = max(220, min(560, width_budget // max(1, rooms_per_row)))
+    return rooms_per_row, column_width
+
 
 def render_programme_tab(
     state,
@@ -39,7 +64,11 @@ def render_programme_tab(
             key=f"programme_block_filter_{day_pick}",
         )
     with c2:
-        column_width = st.slider("Column Width", min_value=220, max_value=560, value=360, step=10)
+        columns_choice = st.selectbox(
+            "Columns per row",
+            PROGRAMME_COLUMN_OPTIONS,
+            key="programme_columns_per_row",
+        )
 
     selection = st.session_state.get("programme_selection", {})
     has_selection = isinstance(selection, dict) and bool(selection.get("session_id"))
@@ -66,9 +95,11 @@ def render_programme_tab(
         )
         max_rooms = max(max_rooms, room_count)
 
-    width_budget = 960 if has_selection else 1450
-    rooms_per_row = max(1, min(max_rooms, width_budget // max(220, column_width)))
-    st.caption(f"Layout density: {rooms_per_row} room card(s) per row.")
+    rooms_per_row, column_width = resolve_programme_layout_density(
+        max_rooms=max_rooms,
+        has_selection=has_selection,
+        columns_choice=columns_choice,
+    )
 
     def _render_grid_content() -> None:
         st.caption("Click a session card or slot block to open the inspector.")

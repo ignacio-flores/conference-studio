@@ -41,7 +41,7 @@ def apply_paper_placements(
     session_map = {
         getattr(s, "session_id", ""): s
         for s in sessions
-        if str(getattr(s, "status", "active")).strip().lower() == "active"
+        if str(getattr(s, "session_id", "")).strip()
     }
 
     slot_map: Dict[Tuple[str, int], Optional[str]] = {}

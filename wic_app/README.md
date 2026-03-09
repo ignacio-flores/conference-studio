@@ -44,7 +44,7 @@ streamlit run wic_app/app.py
 1. Use **Programme** as the primary workspace:
 2. Click a session header or slot in the grid to open the **Inspector** (right panel).
 3. Edit paper classification, move/drop papers, or assign empty slots from the Inspector.
-4. Edit session titles from the Inspector (or in **Session Names** for bulk edits).
+4. Edit session titles from the Inspector.
 5. Click any session/slot block to open the **Inspector** automatically; use `✕` to close it.
 6. Every edit is auto-applied, auto-saved (`wic_app/state/*.csv`), and synced across tabs.
 7. Use top action buttons for **Publish**, **Undo**, **Reload**, and **Export Draft**.

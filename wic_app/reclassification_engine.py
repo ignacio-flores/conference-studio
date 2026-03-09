@@ -41,6 +41,7 @@ SESSION_NAME_OVERRIDES_FILE = STATE_DIR / "session_name_overrides.csv"
 PROGRAMME_LAYOUT_OVERRIDES_FILE = STATE_DIR / "programme_layout_overrides.csv"
 SESSION_STRUCTURE_FILE = STATE_DIR / "session_structure.csv"
 PAPER_PLACEMENTS_FILE = STATE_DIR / "paper_placements.csv"
+PAPER_METADATA_OVERRIDES_FILE = STATE_DIR / "paper_metadata_overrides.csv"
 MANUAL_TALKS_FILE = STATE_DIR / "manual_talks.csv"
 
 DRAFT_OUTPUT_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("draft_output", "WIC2026_Programme_Draft.xlsx")
@@ -390,6 +391,13 @@ PAPER_PLACEMENT_HEADERS = [
     "UpdatedAt",
 ]
 
+PAPER_METADATA_HEADERS = [
+    "SubmissionID",
+    "TitleOverride",
+    "AuthorOverride",
+    "UpdatedAt",
+]
+
 MANUAL_TALKS_HEADERS = [
     "SubmissionID",
     "FullName",
@@ -512,6 +520,7 @@ def _base_cache_key(submissions_path: Path, programme_path: Path, config: Confer
 def _compute_edited_submission_ids(
     class_overrides: Dict[str, Dict[str, str]],
     layout_overrides: Dict[str, Dict[str, str]],
+    metadata_overrides: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> set[str]:
     edited: set[str] = set()
     for sid, row in class_overrides.items():
@@ -529,6 +538,10 @@ def _compute_edited_submission_ids(
         talk_index = str(row.get("TalkIndex", "")).strip()
         overflow_order = str(row.get("OverflowOrder", "")).strip()
         if status in {"unassigned", "overflow"} or session_code or talk_index or overflow_order:
+            edited.add(sid)
+
+    for sid, row in (metadata_overrides or {}).items():
+        if str(row.get("TitleOverride", "")).strip() or str(row.get("AuthorOverride", "")).strip():
             edited.add(sid)
 
     return edited
@@ -872,6 +885,7 @@ def ensure_state_files(
     programme_layout_overrides_file: Path = PROGRAMME_LAYOUT_OVERRIDES_FILE,
     session_structure_file: Path = SESSION_STRUCTURE_FILE,
     paper_placements_file: Path = PAPER_PLACEMENTS_FILE,
+    paper_metadata_overrides_file: Path = PAPER_METADATA_OVERRIDES_FILE,
     manual_talks_file: Path = MANUAL_TALKS_FILE,
 ) -> None:
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -899,6 +913,11 @@ def ensure_state_files(
     if not paper_placements_file.exists():
         with paper_placements_file.open("w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=PAPER_PLACEMENT_HEADERS)
+            writer.writeheader()
+
+    if not paper_metadata_overrides_file.exists():
+        with paper_metadata_overrides_file.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=PAPER_METADATA_HEADERS)
             writer.writeheader()
 
     if not manual_talks_file.exists():
@@ -950,6 +969,46 @@ def write_classification_overrides(rows: Iterable[Dict[str, str]], path: Path = 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CLASSIFICATION_HEADERS)
+        writer.writeheader()
+        for sid in sorted(normalized.keys(), key=lambda x: (len(x), x)):
+            writer.writerow(normalized[sid])
+
+
+def load_paper_metadata_overrides(path: Path = PAPER_METADATA_OVERRIDES_FILE) -> Dict[str, Dict[str, str]]:
+    rows = _load_csv_rows(path, PAPER_METADATA_HEADERS)
+    out: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        sid = row.get("SubmissionID", "")
+        if not sid:
+            continue
+        out[sid] = row
+    return out
+
+
+def write_paper_metadata_overrides(
+    rows: Iterable[Dict[str, str]],
+    path: Path = PAPER_METADATA_OVERRIDES_FILE,
+) -> None:
+    normalized: Dict[str, Dict[str, str]] = {}
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    for row in rows:
+        sid = str(row.get("SubmissionID", "")).strip()
+        if not sid:
+            continue
+        title_override = str(row.get("TitleOverride", "")).strip()
+        author_override = str(row.get("AuthorOverride", "")).strip()
+        if not title_override and not author_override:
+            continue
+        normalized[sid] = {
+            "SubmissionID": sid,
+            "TitleOverride": title_override,
+            "AuthorOverride": author_override,
+            "UpdatedAt": str(row.get("UpdatedAt", "")).strip() or now,
+        }
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=PAPER_METADATA_HEADERS)
         writer.writeheader()
         for sid in sorted(normalized.keys(), key=lambda x: (len(x), x)):
             writer.writerow(normalized[sid])
@@ -1228,6 +1287,24 @@ def write_manual_talks(rows: Iterable[Dict[str, str]], path: Path = MANUAL_TALKS
         writer.writeheader()
         for sid in sorted(normalized.keys(), key=lambda x: (len(x), x)):
             writer.writerow(normalized[sid])
+
+
+def _apply_paper_metadata_overrides(
+    papers: Iterable[Paper],
+    metadata_overrides: Dict[str, Dict[str, str]],
+) -> None:
+    if not metadata_overrides:
+        return
+    for paper in papers:
+        row = metadata_overrides.get(paper.submission_id, {})
+        if not row:
+            continue
+        title_override = str(row.get("TitleOverride", "")).strip()
+        author_override = str(row.get("AuthorOverride", "")).strip()
+        if title_override:
+            paper.title = title_override
+        if author_override:
+            paper.full_name = author_override
 
 
 def _parse_block_num_from_label(block_label: str, default: int = 0) -> int:
@@ -2227,6 +2304,7 @@ def build_programme_state(
     programme_layout_overrides_path: Path = PROGRAMME_LAYOUT_OVERRIDES_FILE,
     session_structure_path: Path = SESSION_STRUCTURE_FILE,
     paper_placements_path: Path = PAPER_PLACEMENTS_FILE,
+    paper_metadata_overrides_path: Path = PAPER_METADATA_OVERRIDES_FILE,
     manual_talks_path: Path = MANUAL_TALKS_FILE,
     config_path: Optional[Path] = None,
 ) -> ProgrammeState:
@@ -2246,6 +2324,7 @@ def build_programme_state(
         programme_layout_overrides_path,
         session_structure_path,
         paper_placements_path,
+        paper_metadata_overrides_path,
         manual_talks_path,
     )
 
@@ -2273,6 +2352,8 @@ def build_programme_state(
 
     class_overrides = load_classification_overrides(classification_overrides_path)
     classify_papers(papers, class_overrides)
+    metadata_overrides = load_paper_metadata_overrides(paper_metadata_overrides_path)
+    _apply_paper_metadata_overrides(papers, metadata_overrides)
     session_name_overrides = load_session_name_overrides(session_name_overrides_path)
 
     session_rows = load_session_structure_rows(session_structure_path)
@@ -2320,8 +2401,8 @@ def build_programme_state(
     active_sessions = [session for session in all_sessions if session.status == "active"]
     inactive_sessions = [session for session in all_sessions if session.status != "active"]
 
-    unassigned_papers, slot_conflicts = apply_paper_placements_core(papers, active_sessions, placements)
-    _refresh_session_theme_metadata(active_sessions)
+    unassigned_papers, slot_conflicts = apply_paper_placements_core(papers, all_sessions, placements)
+    _refresh_session_theme_metadata(all_sessions)
     for session in all_sessions:
         if session.session_code in session_name_overrides:
             session.session_title = session_name_overrides[session.session_code]
@@ -2331,7 +2412,7 @@ def build_programme_state(
         paper_placements_path=paper_placements_path,
         session_structure_path=session_structure_path,
     )
-    edited_submission_ids = _compute_edited_submission_ids(class_overrides, layout_overrides)
+    edited_submission_ids = _compute_edited_submission_ids(class_overrides, layout_overrides, metadata_overrides)
 
     state = ProgrammeState(
         papers=papers,
@@ -2380,48 +2461,6 @@ def papers_to_rows(state: ProgrammeState) -> List[Dict[str, object]]:
                 "AssignmentRationale": paper.rationale,
             }
         )
-    return rows
-
-
-def sessions_to_rows(state: ProgrammeState) -> List[Dict[str, object]]:
-    rows: List[Dict[str, object]] = []
-    for session in sorted(
-        state.all_sessions,
-        key=lambda s: (s.day_num, s.start_min, room_sort_key(s.room)),
-    ):
-        duration_min = max(0, int(session.end_min) - int(session.start_min))
-        auto_title = (
-            f"{session.session_code} Session"
-            if session.primary_theme == "General" and session.subtheme == "General"
-            else f"{session.primary_theme}: {session.subtheme}"
-        )
-        row: Dict[str, object] = {
-            "SessionId": session.session_id,
-            "SessionCode": session.session_code,
-            "Status": session.status,
-            "Day": session.day_label,
-            "Block": session.block_label,
-            "Time": session.time,
-            "StartMin": session.start_min,
-            "EndMin": session.end_min,
-            "StartTime": format_minutes(session.start_min),
-            "EndTime": format_minutes(session.end_min),
-            "DurationMin": duration_min,
-            "Room": session.room,
-            "Capacity": session.capacity,
-            "AutoTitle": auto_title,
-            "SessionTitle": session.session_title,
-            "PrimaryTheme": session.primary_theme,
-            "Subtheme": session.subtheme,
-            "OverflowCount": len(session.overflow_papers),
-            "OverflowSubmissionIDs": ", ".join([p.submission_id for p in session.overflow_papers]),
-            "OverflowTitles": " | ".join([p.title for p in session.overflow_papers]),
-        }
-        for idx, paper in enumerate(session.papers, start=1):
-            row[f"Slot{idx}_SubmissionID"] = paper.submission_id if paper else ""
-            row[f"Slot{idx}_Presenter"] = paper.full_name if paper else "[Reserve slot]"
-            row[f"Slot{idx}_Title"] = paper.title if paper else "[Reserve slot]"
-        rows.append(row)
     return rows
 
 

@@ -16,6 +16,7 @@ from exporters.publish import export_draft_workbook, export_publish_excel, expor
 from reclassification_engine import (
     CLASSIFICATION_OVERRIDES_FILE,
     MANUAL_TALKS_FILE,
+    PAPER_METADATA_OVERRIDES_FILE,
     PAPER_PLACEMENTS_FILE,
     PROGRAMME_FILE,
     PROGRAMME_LAYOUT_OVERRIDES_FILE,
@@ -29,12 +30,14 @@ from reclassification_engine import (
     create_manual_talk,
     create_session,
     load_paper_placements,
+    load_paper_metadata_overrides,
     load_session_structure_rows,
     parse_programme_slots,
     remove_session,
     restore_session,
     update_session_structure_row,
     write_paper_placements,
+    write_paper_metadata_overrides,
     write_session_name_overrides,
     write_session_structure_rows,
 )
@@ -50,6 +53,7 @@ class EngineTests(unittest.TestCase):
             "layout": state_dir / "programme_layout_overrides.csv",
             "structure": state_dir / "session_structure.csv",
             "placements": state_dir / "paper_placements.csv",
+            "metadata": state_dir / "paper_metadata_overrides.csv",
             "manual": state_dir / "manual_talks.csv",
         }
 
@@ -62,6 +66,7 @@ class EngineTests(unittest.TestCase):
             programme_layout_overrides_path=paths["layout"],
             session_structure_path=paths["structure"],
             paper_placements_path=paths["placements"],
+            paper_metadata_overrides_path=paths["metadata"],
             manual_talks_path=paths["manual"],
         )
 
@@ -455,6 +460,99 @@ class EngineTests(unittest.TestCase):
             state_reset = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
             reset = next(s for s in state_reset.sessions if s.session_code == session.session_code)
             self.assertNotEqual(reset.session_title, custom_title)
+
+    def test_paper_metadata_overrides_apply_to_title_and_author(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (PAPER_METADATA_OVERRIDES_FILE, "metadata"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            state = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            paper = state.papers[0]
+            sid = paper.submission_id
+            new_title = f"{paper.title} (Edited)"
+            new_author = f"{paper.full_name} (Edited)"
+
+            write_paper_metadata_overrides(
+                [
+                    {
+                        "SubmissionID": sid,
+                        "TitleOverride": new_title,
+                        "AuthorOverride": new_author,
+                    }
+                ],
+                paths["metadata"],
+            )
+            loaded = load_paper_metadata_overrides(paths["metadata"])
+            self.assertEqual(loaded[sid]["TitleOverride"], new_title)
+            self.assertEqual(loaded[sid]["AuthorOverride"], new_author)
+
+            state_after = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            updated = next(p for p in state_after.papers if p.submission_id == sid)
+            self.assertEqual(updated.title, new_title)
+            self.assertEqual(updated.full_name, new_author)
+
+    def test_assignment_to_inactive_session_is_tracked_as_inactive_assigned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (PAPER_METADATA_OVERRIDES_FILE, "metadata"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            state = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            if not state.inactive_sessions:
+                chosen = state.sessions[0]
+                remove_result = remove_session(
+                    chosen.session_id,
+                    session_structure_path=paths["structure"],
+                    paper_placements_path=paths["placements"],
+                )
+                self.assertTrue(remove_result.get("ok", False))
+                state = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+
+            self.assertTrue(state.inactive_sessions, "Expected at least one inactive session for this test.")
+            inactive_session = state.inactive_sessions[0]
+            paper = state.papers[0]
+            sid = paper.submission_id
+
+            placements = load_paper_placements(paths["placements"])
+            placements[sid] = {
+                "SubmissionID": sid,
+                "PlacementStatus": "scheduled",
+                "SessionId": inactive_session.session_id,
+                "TalkIndex": "999",
+                "OverflowOrder": "",
+                "UpdatedAt": "",
+            }
+            write_paper_placements(placements.values(), paths["placements"])
+
+            state_after = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            updated = next(p for p in state_after.papers if p.submission_id == sid)
+            self.assertEqual(updated.session_id, inactive_session.session_id)
+            self.assertNotEqual(updated.placement_status, "unassigned")
+            self.assertNotIn(sid, [p.submission_id for p in state_after.unassigned_papers])
+            self.assertNotIn(sid, state_after.validations.get("missing_submission_ids", []))
+            self.assertGreaterEqual(int(state_after.validations.get("inactive_assigned_papers", 0) or 0), 1)
+            self.assertIn(sid, state_after.validations.get("inactive_assigned_submission_ids", []))
 
 
 if __name__ == "__main__":
