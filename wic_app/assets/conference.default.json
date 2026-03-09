@@ -741,6 +741,7 @@
   },
   "structure": {
     "default_session_capacity": 4,
+    "default_session_duration_min": 90,
     "allow_duplicate_day_time_room": false,
     "enforce_unique_session_code": true
   }

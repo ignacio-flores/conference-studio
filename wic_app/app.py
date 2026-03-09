@@ -11,7 +11,6 @@ import pandas as pd
 import streamlit as st
 
 from engine.config import load_conference_config
-from engine.scheduling import build_equal_time_ranges
 from exporters.publish import export_draft_workbook, export_publish_excel, export_publish_pdf
 from reclassification_engine import (
     CLASSIFICATION_OVERRIDES_FILE,
@@ -21,7 +20,7 @@ from reclassification_engine import (
     SESSION_STRUCTURE_FILE,
     SESSION_NAME_OVERRIDES_FILE,
     THEME_ORDER,
-    add_room_session,
+    bulk_add_room_sessions,
     build_programme_state,
     clear_session,
     create_manual_talk,
@@ -30,10 +29,8 @@ from reclassification_engine import (
     load_manual_talks,
     load_classification_overrides,
     load_paper_placements,
-    load_programme_layout_overrides,
     load_session_structure_rows,
     load_session_name_overrides,
-    parse_end_minutes,
     parse_start_minutes,
     papers_to_rows,
     programme_talk_rows,
@@ -44,9 +41,7 @@ from reclassification_engine import (
     update_session_structure_row,
     validate_session_structure_rows,
     write_classification_overrides,
-    write_manual_talks,
     write_paper_placements,
-    write_programme_layout_overrides,
     write_session_structure_rows,
     write_session_name_overrides,
 )
@@ -54,6 +49,12 @@ from ui.actions import render_top_actions
 from ui.papers import render_paper_list_tab
 from ui.programme import render_programme_tab as render_programme_tab_view
 from ui.sessions import render_session_names_tab
+from ui.structure_time import (
+    build_time_label,
+    minutes_to_clock,
+    parse_clock_minutes,
+    resolve_session_time_inputs,
+)
 
 NOTE_SPLIT_RE = re.compile(r"note\s*to\s*conference\s*organizers", re.IGNORECASE)
 HTML_TAG_RE = re.compile(r"<[^>]+>")
@@ -284,7 +285,7 @@ def _apply_session_name_edits_if_changed(edited_df: pd.DataFrame) -> bool:
         if not code:
             continue
 
-        new_title = _normalize_text(row.get("SessionTitleOverride", ""))
+        new_title = _normalize_text(row.get("CustomTitle", row.get("SessionTitleOverride", "")))
         old_title = _normalize_text(current_overrides.get(code, ""))
 
         if new_title == old_title:
@@ -351,13 +352,20 @@ def _apply_session_structure_edits_if_changed(edited_df: pd.DataFrame) -> bool:
         else:
             candidate["BlockNum"] = _normalize_int_string(block_text, int(current.get("BlockNum", "0") or 0))
 
-        candidate["TimeLabel"] = _normalize_text(row.get("TimeLabel", current.get("TimeLabel", "")))
-        start_default = parse_start_minutes(candidate["TimeLabel"])
-        end_default = parse_end_minutes(candidate["TimeLabel"], default_duration=90)
-        candidate["StartMin"] = _normalize_int_string(row.get("StartMin", current.get("StartMin", "")), start_default)
-        candidate["EndMin"] = _normalize_int_string(row.get("EndMin", current.get("EndMin", "")), end_default)
-        if int(candidate["EndMin"]) <= int(candidate["StartMin"]):
-            candidate["EndMin"] = str(int(candidate["StartMin"]) + 90)
+        current_start = int(current.get("StartMin", "0") or 0)
+        current_end = int(
+            current.get("EndMin", str(current_start + config.structure.default_session_duration_min)) or 0
+        )
+        start_min, _, end_min, time_label = resolve_session_time_inputs(
+            start_time_value=row.get("StartTime", current_start),
+            duration_value=row.get("DurationMin", max(1, current_end - current_start)),
+            current_start_min=current_start,
+            current_end_min=current_end,
+            default_duration_min=config.structure.default_session_duration_min,
+        )
+        candidate["StartMin"] = str(start_min)
+        candidate["EndMin"] = str(end_min)
+        candidate["TimeLabel"] = time_label
 
         candidate["Room"] = _normalize_text(row.get("Room", current.get("Room", "")))
         candidate["Capacity"] = _normalize_int_string(
@@ -493,22 +501,30 @@ def _render_structure_tab(state) -> None:
             _normalize_text(row.get("SessionCode", "")),
         ),
     )
-    structure_columns = [
-        "SessionId",
-        "SessionCode",
-        "Status",
-        "DayLabel",
-        "DayNum",
-        "BlockLabel",
-        "BlockNum",
-        "TimeLabel",
-        "StartMin",
-        "EndMin",
-        "Room",
-        "Capacity",
-        "Source",
-    ]
-    structure_df = pd.DataFrame(session_rows, columns=structure_columns)
+    structure_editor_rows: List[Dict[str, object]] = []
+    for row in session_rows:
+        start_min = int(str(row.get("StartMin", "0") or "0"))
+        end_min = int(str(row.get("EndMin", str(start_min + config.structure.default_session_duration_min)) or "0"))
+        duration_min = max(1, end_min - start_min)
+        structure_editor_rows.append(
+            {
+                "SessionId": _normalize_text(row.get("SessionId", "")),
+                "SessionCode": _normalize_text(row.get("SessionCode", "")),
+                "Status": _normalize_text(row.get("Status", "active")),
+                "DayLabel": _normalize_text(row.get("DayLabel", "")),
+                "DayNum": int(str(row.get("DayNum", "0") or "0")),
+                "BlockLabel": _normalize_text(row.get("BlockLabel", "")),
+                "BlockNum": int(str(row.get("BlockNum", "0") or "0")),
+                "StartTime": minutes_to_clock(start_min),
+                "DurationMin": duration_min,
+                "EndTime": minutes_to_clock(start_min + duration_min),
+                "TimeLabel": build_time_label(start_min, start_min + duration_min),
+                "Room": _normalize_text(row.get("Room", "")),
+                "Capacity": int(str(row.get("Capacity", str(config.structure.default_session_capacity)) or config.structure.default_session_capacity)),
+                "Source": _normalize_text(row.get("Source", "manual")) or "manual",
+            }
+        )
+    structure_df = pd.DataFrame(structure_editor_rows)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Active sessions", len(state.sessions))
@@ -534,9 +550,10 @@ def _render_structure_tab(state) -> None:
                 "DayNum": st.column_config.NumberColumn(format="%d"),
                 "BlockLabel": st.column_config.TextColumn(),
                 "BlockNum": st.column_config.NumberColumn(format="%d"),
-                "TimeLabel": st.column_config.TextColumn(),
-                "StartMin": st.column_config.NumberColumn(format="%d"),
-                "EndMin": st.column_config.NumberColumn(format="%d"),
+                "StartTime": st.column_config.TextColumn(help="HH:MM"),
+                "DurationMin": st.column_config.NumberColumn(format="%d"),
+                "EndTime": st.column_config.TextColumn(disabled=True),
+                "TimeLabel": st.column_config.TextColumn(disabled=True),
                 "Room": st.column_config.TextColumn(),
                 "Capacity": st.column_config.NumberColumn(format="%d"),
                 "Source": st.column_config.TextColumn(),
@@ -633,7 +650,15 @@ def _render_structure_tab(state) -> None:
     with st.form("create_session_form", clear_on_submit=False):
         day_label = st.selectbox("Day", day_options, key="create_session_day")
         block_label = st.text_input("Block Label", value="SESSION 1", key="create_session_block")
-        time_label = st.text_input("Time Label", value="09h30-11h00", key="create_session_time")
+        start_time = st.text_input("Start Time (HH:MM)", value="09:30", key="create_session_start_time")
+        duration_min = st.number_input(
+            "Duration (min)",
+            min_value=1,
+            max_value=360,
+            value=config.structure.default_session_duration_min,
+            step=5,
+            key="create_session_duration",
+        )
         room = st.text_input("Room", value="R-New", key="create_session_room")
         capacity = st.number_input(
             "Capacity",
@@ -647,12 +672,17 @@ def _render_structure_tab(state) -> None:
         create_submit = st.form_submit_button("Create Session", use_container_width=True)
         if create_submit:
             st.session_state.last_change = _snapshot_for_undo()
+            start_min = parse_clock_minutes(start_time, default=parse_start_minutes("9h30"))
+            end_min = start_min + int(duration_min)
+            time_label = build_time_label(start_min, end_min)
             result = create_session(
                 day_label=day_label,
                 block_label=block_label,
                 time_label=time_label,
                 room=room,
                 capacity=int(capacity),
+                start_min=start_min,
+                end_min=end_min,
                 session_code=session_code,
                 source="manual",
                 config_path=_app_config_path(),
@@ -662,24 +692,32 @@ def _render_structure_tab(state) -> None:
                 st.rerun()
             st.error(str(result.get("error", "Failed to create session.")))
 
-    st.markdown("#### Add Room (Single Block)")
-    block_options = []
-    for session in active_sessions:
-        block_options.append(
-            (
-                session.day_label,
-                session.block_label,
-                session.time,
-                f"{session.day_label} | {session.block_label} | {session.time}",
-            )
-        )
-    deduped: Dict[str, Tuple[str, str, str]] = {}
-    for day_label, block_label, time_label, label in block_options:
-        deduped[label] = (day_label, block_label, time_label)
-    sorted_labels = sorted(deduped.keys())
-    if sorted_labels:
-        with st.form("add_room_form", clear_on_submit=False):
-            block_pick = st.selectbox("Block/Time", sorted_labels, key="add_room_block_pick")
+    st.markdown("#### Add Room (Bulk)")
+    known_days = sorted({row.get("DayLabel", "") for row in session_rows if row.get("DayLabel", "")})
+    if not known_days:
+        known_days = list(config.days)
+
+    block_signature_to_label: Dict[str, str] = {}
+    for row in session_rows:
+        block_num = int(str(row.get("BlockNum", "0") or "0"))
+        block_label = _normalize_text(row.get("BlockLabel", ""))
+        time_label = _normalize_text(row.get("TimeLabel", ""))
+        if block_num <= 0 or not time_label:
+            continue
+        signature = f"{block_num}::{block_label}::{time_label}"
+        display_label = f"B{block_num} | {block_label} | {time_label}"
+        block_signature_to_label[signature] = display_label
+    block_signatures_sorted = sorted(
+        block_signature_to_label.keys(),
+        key=lambda sig: (
+            int(sig.split("::", 1)[0]),
+            block_signature_to_label.get(sig, ""),
+        ),
+    )
+
+    if known_days and block_signatures_sorted:
+        with st.form("add_room_bulk_form", clear_on_submit=False):
+            st.caption("Default selection includes all days and all known blocks.")
             new_room = st.text_input("New Room", value="R-New2", key="add_room_name")
             new_capacity = st.number_input(
                 "Capacity",
@@ -689,24 +727,42 @@ def _render_structure_tab(state) -> None:
                 step=1,
                 key="add_room_capacity",
             )
-            add_room_submit = st.form_submit_button("Add Room Session", use_container_width=True)
+            selected_days = st.multiselect(
+                "Days",
+                options=known_days,
+                default=known_days,
+                key="add_room_days",
+            )
+            selected_signatures = st.multiselect(
+                "Blocks",
+                options=block_signatures_sorted,
+                default=block_signatures_sorted,
+                format_func=lambda sig: block_signature_to_label.get(sig, sig),
+                key="add_room_block_signatures",
+            )
+            add_room_submit = st.form_submit_button("Add Room Sessions", use_container_width=True)
             if add_room_submit:
-                day_label, block_label, time_label = deduped[block_pick]
                 st.session_state.last_change = _snapshot_for_undo()
-                result = add_room_session(
-                    day_label=day_label,
-                    block_label=block_label,
-                    time_label=time_label,
+                result = bulk_add_room_sessions(
                     room=new_room,
                     capacity=int(new_capacity),
+                    day_labels=list(selected_days),
+                    block_signatures=list(selected_signatures),
                     config_path=_app_config_path(),
                 )
                 if result.get("ok", False):
-                    _refresh_state(f"Added room session {result.get('session_code', '')}.")
+                    created = int(result.get("created", 0) or 0)
+                    skipped_active = int(result.get("skipped_active", 0) or 0)
+                    skipped_inactive = int(result.get("skipped_inactive", 0) or 0)
+                    summary = (
+                        f"Bulk add complete. Created {created}, "
+                        f"skipped active {skipped_active}, skipped inactive {skipped_inactive}."
+                    )
+                    _refresh_state(summary)
                     st.rerun()
-                st.error(str(result.get("error", "Failed to add room session.")))
+                st.error(str(result.get("error", "Failed to add room sessions.")))
     else:
-        st.info("No active block/time combinations available yet. Create a first session above.")
+        st.info("No known day/block combinations available yet. Create a first session above.")
 
     st.markdown("#### Manual Talks (From-Scratch Input)")
     manual_papers = load_manual_talks(MANUAL_TALKS_FILE)
@@ -1212,10 +1268,14 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
     st.caption(f"Theme: {session.primary_theme}")
     st.caption(f"Subtheme: {session.subtheme}")
     st.caption(f"Capacity: {session.capacity}")
+    st.caption(
+        f"Time: {minutes_to_clock(session.start_min)}-{minutes_to_clock(session.end_min)} "
+        f"({max(1, session.end_min - session.start_min)} min)"
+    )
 
     st.markdown("---")
     st.caption("Structure")
-    cap_col, code_col = st.columns(2)
+    cap_col, code_col, dur_col = st.columns(3)
     new_capacity = cap_col.number_input(
         "Capacity",
         min_value=1,
@@ -1229,11 +1289,24 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
         value=session.session_code,
         key=f"ins_session_code_{session.session_id}",
     )
+    new_duration = dur_col.number_input(
+        "Duration (min)",
+        min_value=1,
+        max_value=360,
+        value=max(1, int(session.end_min - session.start_min)),
+        step=5,
+        key=f"ins_duration_{session.session_id}",
+    )
     if st.button("Apply Structure Changes", key=f"ins_apply_structure_{session.session_id}", use_container_width=True):
         snapshot = _snapshot_for_undo()
         result = update_session_structure_row(
             session.session_id,
-            {"Capacity": str(int(new_capacity)), "SessionCode": new_code},
+            {
+                "Capacity": str(int(new_capacity)),
+                "SessionCode": new_code,
+                "EndMin": str(int(session.start_min) + int(new_duration)),
+                "TimeLabel": build_time_label(int(session.start_min), int(session.start_min) + int(new_duration)),
+            },
         )
         if not result.get("ok", False):
             st.error(str(result.get("error", "Failed to update session structure.")))

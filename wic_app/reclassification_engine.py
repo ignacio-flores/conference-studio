@@ -658,6 +658,12 @@ def format_minutes(total_minutes: int) -> str:
     return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
 
 
+def build_time_label(start_min: int, end_min: int) -> str:
+    start = max(0, int(start_min))
+    end = max(start + 1, int(end_min))
+    return f"{start // 60}h{start % 60:02d}-{end // 60}h{end % 60:02d}"
+
+
 def room_sort_key(room: str) -> Tuple[int, str]:
     return (ROOM_PRIORITY.get(room, 999), room)
 
@@ -670,6 +676,14 @@ def _parse_positive_int(raw: str, default: int = 0) -> int:
     try:
         value = int(str(raw).strip())
         return value if value > 0 else default
+    except Exception:
+        return default
+
+
+def _parse_nonnegative_int(raw: str, default: int = 0) -> int:
+    try:
+        value = int(str(raw).strip())
+        return value if value >= 0 else default
     except Exception:
         return default
 
@@ -1087,9 +1101,12 @@ def write_session_structure_rows(rows: Iterable[Dict[str, str]], path: Path = SE
             status = "active"
         capacity = _parse_positive_int(row.get("Capacity", "4"), default=4)
         start_min = _parse_positive_int(row.get("StartMin", "0"), default=0)
-        end_min = _parse_positive_int(row.get("EndMin", "0"), default=max(1, start_min + 90))
+        end_min = _parse_positive_int(
+            row.get("EndMin", "0"),
+            default=max(1, start_min + ACTIVE_CONFERENCE_CONFIG.structure.default_session_duration_min),
+        )
         if end_min <= start_min:
-            end_min = start_min + 90
+            end_min = start_min + ACTIVE_CONFERENCE_CONFIG.structure.default_session_duration_min
         normalized[session_id] = {
             "SessionId": session_id,
             "SessionCode": str(row.get("SessionCode", "")).strip(),
@@ -1432,10 +1449,10 @@ def create_session(
     resolved_end_min = (
         int(end_min)
         if end_min is not None
-        else parse_end_minutes(time_label_clean, default_duration=90)
+        else parse_end_minutes(time_label_clean, default_duration=config.structure.default_session_duration_min)
     )
     if resolved_end_min <= resolved_start_min:
-        resolved_end_min = resolved_start_min + 90
+        resolved_end_min = resolved_start_min + config.structure.default_session_duration_min
     resolved_capacity = _parse_positive_int(str(capacity), default=config.structure.default_session_capacity)
 
     active_rows = [row for row in rows.values() if str(row.get("Status", "active")).strip().lower() == "active"]
@@ -1506,16 +1523,159 @@ def add_room_session(
     session_structure_path: Path = SESSION_STRUCTURE_FILE,
     config_path: Optional[Path] = None,
 ) -> Dict[str, object]:
+    config = load_conference_config(config_path)
+    start_min = parse_start_minutes(time_label)
+    end_min = start_min + max(1, int(config.structure.default_session_duration_min))
     return create_session(
         day_label=day_label,
         block_label=block_label,
         time_label=time_label,
         room=room,
         capacity=capacity,
+        start_min=start_min,
+        end_min=end_min,
         source="manual",
         session_structure_path=session_structure_path,
         config_path=config_path,
     )
+
+
+def bulk_add_room_sessions(
+    room: str,
+    capacity: int,
+    day_labels: List[str],
+    block_signatures: List[str],
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    config_path: Optional[Path] = None,
+) -> Dict[str, object]:
+    config = load_conference_config(config_path)
+    rows = load_session_structure_rows(session_structure_path)
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    room_clean = str(room).strip()
+    if not room_clean:
+        return {"ok": False, "error": "Room is required."}
+
+    normalized_days = sorted({str(day).strip() for day in (day_labels or []) if str(day).strip()})
+    normalized_signatures = sorted({str(sig).strip() for sig in (block_signatures or []) if str(sig).strip()})
+    if not normalized_days:
+        return {"ok": False, "error": "At least one day must be selected."}
+    if not normalized_signatures:
+        return {"ok": False, "error": "At least one block signature must be selected."}
+
+    existing_by_slot: Dict[Tuple[str, str, str], Dict[str, str]] = {}
+    for row in rows.values():
+        key = (
+            str(row.get("DayLabel", "")).strip(),
+            str(row.get("TimeLabel", "")).strip(),
+            str(row.get("Room", "")).strip(),
+        )
+        if key not in existing_by_slot:
+            existing_by_slot[key] = row
+        elif str(row.get("Status", "")).strip().lower() == "active":
+            existing_by_slot[key] = row
+
+    active_codes = {
+        str(row.get("SessionCode", "")).strip()
+        for row in rows.values()
+        if str(row.get("Status", "active")).strip().lower() == "active" and str(row.get("SessionCode", "")).strip()
+    }
+    parsed_blocks: Dict[str, Tuple[int, str, str]] = {}
+    parse_errors: List[str] = []
+    for signature in normalized_signatures:
+        try:
+            parsed_blocks[signature] = parse_block_signature(signature)
+        except Exception:
+            parse_errors.append(f"Invalid block signature: {signature}")
+
+    if parse_errors:
+        return {"ok": False, "error": parse_errors[0], "errors": parse_errors}
+
+    created: List[str] = []
+    skipped_active: List[str] = []
+    skipped_inactive: List[str] = []
+    errors: List[str] = []
+    resolved_capacity = _parse_positive_int(str(capacity), default=config.structure.default_session_capacity)
+    default_duration = max(1, int(config.structure.default_session_duration_min))
+
+    for day_label in normalized_days:
+        resolved_day_num = int(config.day_to_num.get(day_label, 0))
+        if resolved_day_num <= 0:
+            day_rows = [row for row in rows.values() if str(row.get("DayLabel", "")).strip() == day_label]
+            if day_rows:
+                resolved_day_num = _parse_positive_int(day_rows[0].get("DayNum", ""), default=0)
+        if resolved_day_num <= 0:
+            errors.append(f"Unknown day label: {day_label}")
+            continue
+
+        for signature in normalized_signatures:
+            block_num, block_label, time_label = parsed_blocks[signature]
+            slot_key = (day_label, time_label, room_clean)
+            existing = existing_by_slot.get(slot_key)
+            if existing is not None:
+                status = str(existing.get("Status", "active")).strip().lower()
+                code = str(existing.get("SessionCode", "")).strip() or str(existing.get("SessionId", "")).strip()
+                if status == "active":
+                    skipped_active.append(code)
+                else:
+                    skipped_inactive.append(code)
+                continue
+
+            start_min = parse_start_minutes(time_label)
+            end_min = start_min + default_duration
+            base_code = _default_session_code(resolved_day_num, block_num, room_clean)
+            session_code = base_code
+            if config.structure.enforce_unique_session_code and session_code in active_codes:
+                session_code = _next_available_session_code(base_code, active_codes)
+
+            session_id = str(uuid.uuid4())
+            new_row = {
+                "SessionId": session_id,
+                "SessionCode": session_code,
+                "Status": "active",
+                "DayLabel": day_label,
+                "DayNum": str(resolved_day_num),
+                "BlockLabel": block_label,
+                "BlockNum": str(block_num),
+                "TimeLabel": time_label,
+                "StartMin": str(start_min),
+                "EndMin": str(end_min),
+                "Room": room_clean,
+                "Capacity": str(resolved_capacity),
+                "Source": "manual",
+                "UpdatedAt": now,
+            }
+            rows[session_id] = new_row
+            existing_by_slot[slot_key] = new_row
+            active_codes.add(session_code)
+            created.append(session_code)
+
+    if not created and not errors:
+        return {
+            "ok": True,
+            "created": 0,
+            "created_codes": [],
+            "skipped_active": len(skipped_active),
+            "skipped_active_codes": sorted(skipped_active),
+            "skipped_inactive": len(skipped_inactive),
+            "skipped_inactive_codes": sorted(skipped_inactive),
+            "errors": [],
+        }
+
+    validation_errors = validate_session_structure_rows(rows.values(), config)
+    if validation_errors:
+        return {"ok": False, "error": validation_errors[0], "errors": validation_errors}
+
+    write_session_structure_rows(rows.values(), session_structure_path)
+    return {
+        "ok": True,
+        "created": len(created),
+        "created_codes": sorted(created),
+        "skipped_active": len(skipped_active),
+        "skipped_active_codes": sorted(skipped_active),
+        "skipped_inactive": len(skipped_inactive),
+        "skipped_inactive_codes": sorted(skipped_inactive),
+        "errors": errors,
+    }
 
 
 def update_session_structure_row(
@@ -1567,7 +1727,18 @@ def update_session_structure_row(
         )
     if "EndMin" not in updates:
         candidate["EndMin"] = str(
-            _parse_positive_int(candidate.get("EndMin", ""), default=parse_end_minutes(candidate.get("TimeLabel", ""), default_duration=90))
+            _parse_positive_int(
+                candidate.get("EndMin", ""),
+                default=parse_end_minutes(
+                    candidate.get("TimeLabel", ""),
+                    default_duration=config.structure.default_session_duration_min,
+                ),
+            )
+        )
+    if _parse_nonnegative_int(candidate.get("EndMin", ""), default=0) <= _parse_nonnegative_int(candidate.get("StartMin", ""), default=0):
+        candidate["EndMin"] = str(
+            _parse_nonnegative_int(candidate.get("StartMin", ""), default=0)
+            + max(1, int(config.structure.default_session_duration_min))
         )
     if "Capacity" not in updates:
         candidate["Capacity"] = str(
@@ -1787,7 +1958,10 @@ def assign_groups_to_slots(
                 block_num=slot.block_num,
                 room=slot.room,
                 start_min=parse_start_minutes(slot.time),
-                end_min=parse_end_minutes(slot.time, default_duration=90),
+                end_min=parse_end_minutes(
+                    slot.time,
+                    default_duration=ACTIVE_CONFERENCE_CONFIG.structure.default_session_duration_min,
+                ),
                 capacity=4,
                 source="template",
                 session_title=session_title,
@@ -1817,7 +1991,27 @@ def _default_session_code(day_num: int, block_num: int, room: str) -> str:
     return f"D{day_num}-B{block_num}-{room}"
 
 
-def _session_row_to_session(row: Dict[str, str], title_overrides: Dict[str, str]) -> Session:
+def _build_block_signature(block_num: int, block_label: str, time_label: str) -> str:
+    return f"{int(block_num)}::{str(block_label).strip()}::{str(time_label).strip()}"
+
+
+def parse_block_signature(signature: str) -> Tuple[int, str, str]:
+    parts = str(signature).split("::", 2)
+    if len(parts) != 3:
+        raise ValueError(f"Invalid block signature: {signature}")
+    block_num = _parse_nonnegative_int(parts[0], default=0)
+    block_label = str(parts[1]).strip()
+    time_label = str(parts[2]).strip()
+    if block_num <= 0 or not time_label:
+        raise ValueError(f"Invalid block signature: {signature}")
+    return block_num, block_label, time_label
+
+
+def _session_row_to_session(
+    row: Dict[str, str],
+    title_overrides: Dict[str, str],
+    default_duration_min: int = ACTIVE_CONFERENCE_CONFIG.structure.default_session_duration_min,
+) -> Session:
     session_id = str(row.get("SessionId", "")).strip() or str(uuid.uuid4())
     day_label = str(row.get("DayLabel", "")).strip()
     day_num = _parse_positive_int(row.get("DayNum", ""), default=DAY_TO_NUM.get(day_label, 0))
@@ -1825,9 +2019,12 @@ def _session_row_to_session(row: Dict[str, str], title_overrides: Dict[str, str]
     block_num = _parse_positive_int(row.get("BlockNum", ""), default=0)
     time_label = str(row.get("TimeLabel", "")).strip()
     start_min = _parse_positive_int(row.get("StartMin", ""), default=parse_start_minutes(time_label))
-    end_min = _parse_positive_int(row.get("EndMin", ""), default=parse_end_minutes(time_label, default_duration=90))
+    end_min = _parse_positive_int(
+        row.get("EndMin", ""),
+        default=parse_end_minutes(time_label, default_duration=default_duration_min),
+    )
     if end_min <= start_min:
-        end_min = start_min + 90
+        end_min = start_min + default_duration_min
     room = str(row.get("Room", "")).strip()
     session_code = str(row.get("SessionCode", "")).strip() or _default_session_code(day_num, block_num, room)
     status = str(row.get("Status", "active")).strip().lower()
@@ -1864,6 +2061,7 @@ def seed_session_structure_from_slots(
     slots: List[Slot],
     path: Path = SESSION_STRUCTURE_FILE,
     default_capacity: int = 4,
+    default_duration_min: int = ACTIVE_CONFERENCE_CONFIG.structure.default_session_duration_min,
 ) -> Dict[str, Dict[str, str]]:
     now = datetime.utcnow().isoformat(timespec="seconds")
     rows: List[Dict[str, str]] = []
@@ -1871,7 +2069,7 @@ def seed_session_structure_from_slots(
         session_code = slot.session_code
         session_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"session:{session_code}"))
         start_min = parse_start_minutes(slot.time)
-        end_min = parse_end_minutes(slot.time, default_duration=90)
+        end_min = start_min + max(1, int(default_duration_min))
         rows.append(
             {
                 "SessionId": session_id,
@@ -1881,7 +2079,7 @@ def seed_session_structure_from_slots(
                 "DayNum": str(slot.day_num),
                 "BlockLabel": slot.block_label,
                 "BlockNum": str(slot.block_num),
-                "TimeLabel": slot.time,
+                "TimeLabel": build_time_label(start_min, end_min),
                 "StartMin": str(start_min),
                 "EndMin": str(end_min),
                 "Room": slot.room,
@@ -1892,6 +2090,38 @@ def seed_session_structure_from_slots(
         )
     write_session_structure_rows(rows, path)
     return load_session_structure_rows(path)
+
+
+def repair_template_session_durations(
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    config_path: Optional[Path] = None,
+) -> Dict[str, object]:
+    config = load_conference_config(config_path)
+    default_duration = max(1, int(config.structure.default_session_duration_min))
+    rows = load_session_structure_rows(session_structure_path)
+    changed = 0
+
+    for session_id, row in rows.items():
+        source = str(row.get("Source", "")).strip().lower()
+        if source != "template":
+            continue
+        start_min = _parse_positive_int(row.get("StartMin", ""), default=parse_start_minutes(row.get("TimeLabel", "")))
+        end_min = _parse_positive_int(
+            row.get("EndMin", ""),
+            default=parse_end_minutes(row.get("TimeLabel", ""), default_duration=default_duration),
+        )
+        if end_min - start_min != 30:
+            continue
+        row["StartMin"] = str(start_min)
+        row["EndMin"] = str(start_min + default_duration)
+        row["TimeLabel"] = build_time_label(start_min, start_min + default_duration)
+        row["UpdatedAt"] = datetime.utcnow().isoformat(timespec="seconds")
+        rows[session_id] = row
+        changed += 1
+
+    if changed > 0:
+        write_session_structure_rows(rows.values(), session_structure_path)
+    return {"ok": True, "updated_sessions": changed}
 
 
 def _backup_legacy_layout_file(path: Path = PROGRAMME_LAYOUT_OVERRIDES_FILE) -> Optional[Path]:
@@ -2051,7 +2281,15 @@ def build_programme_state(
             slots,
             session_structure_path,
             default_capacity=conference_config.structure.default_session_capacity,
+            default_duration_min=conference_config.structure.default_session_duration_min,
         )
+    if session_rows:
+        repair_result = repair_template_session_durations(
+            session_structure_path=session_structure_path,
+            config_path=config_path,
+        )
+        if int(repair_result.get("updated_sessions", 0) or 0) > 0:
+            session_rows = load_session_structure_rows(session_structure_path)
 
     placements = load_paper_placements(paper_placements_path)
     legacy_rows = _load_csv_rows(programme_layout_overrides_path, PROGRAMME_LAYOUT_HEADERS)
@@ -2069,7 +2307,14 @@ def build_programme_state(
             _backup_legacy_layout_file(programme_layout_overrides_path)
 
     all_sessions = sorted(
-        [_session_row_to_session(row, session_name_overrides) for row in session_rows.values()],
+        [
+            _session_row_to_session(
+                row,
+                session_name_overrides,
+                default_duration_min=conference_config.structure.default_session_duration_min,
+            )
+            for row in session_rows.values()
+        ],
         key=lambda s: (s.day_num, s.start_min, room_sort_key(s.room), s.session_code),
     )
     active_sessions = [session for session in all_sessions if session.status == "active"]
@@ -2144,6 +2389,12 @@ def sessions_to_rows(state: ProgrammeState) -> List[Dict[str, object]]:
         state.all_sessions,
         key=lambda s: (s.day_num, s.start_min, room_sort_key(s.room)),
     ):
+        duration_min = max(0, int(session.end_min) - int(session.start_min))
+        auto_title = (
+            f"{session.session_code} Session"
+            if session.primary_theme == "General" and session.subtheme == "General"
+            else f"{session.primary_theme}: {session.subtheme}"
+        )
         row: Dict[str, object] = {
             "SessionId": session.session_id,
             "SessionCode": session.session_code,
@@ -2151,8 +2402,14 @@ def sessions_to_rows(state: ProgrammeState) -> List[Dict[str, object]]:
             "Day": session.day_label,
             "Block": session.block_label,
             "Time": session.time,
+            "StartMin": session.start_min,
+            "EndMin": session.end_min,
+            "StartTime": format_minutes(session.start_min),
+            "EndTime": format_minutes(session.end_min),
+            "DurationMin": duration_min,
             "Room": session.room,
             "Capacity": session.capacity,
+            "AutoTitle": auto_title,
             "SessionTitle": session.session_title,
             "PrimaryTheme": session.primary_theme,
             "Subtheme": session.subtheme,

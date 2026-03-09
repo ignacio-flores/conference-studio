@@ -92,6 +92,7 @@ class ValidationConfig:
 @dataclass(frozen=True)
 class StructureConfig:
     default_session_capacity: int
+    default_session_duration_min: int
     allow_duplicate_day_time_room: bool
     enforce_unique_session_code: bool
 
@@ -247,6 +248,7 @@ def _parse_validation(raw: Dict[str, Any]) -> ValidationConfig:
 def _parse_structure(raw: Dict[str, Any]) -> StructureConfig:
     return StructureConfig(
         default_session_capacity=max(1, int(raw.get("default_session_capacity", 4))),
+        default_session_duration_min=max(1, int(raw.get("default_session_duration_min", 90))),
         allow_duplicate_day_time_room=bool(raw.get("allow_duplicate_day_time_room", False)),
         enforce_unique_session_code=bool(raw.get("enforce_unique_session_code", True)),
     )
