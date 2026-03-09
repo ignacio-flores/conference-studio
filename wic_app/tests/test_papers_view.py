@@ -86,6 +86,14 @@ class PapersViewTests(unittest.TestCase):
 
     def test_table_details_button_key_is_used(self) -> None:
         text = (APP_ROOT / "ui" / "papers.py").read_text(encoding="utf-8")
+        self.assertIn("PAPER_LIST_PAGE_SIZE = 20", text)
+        self.assertIn("paper_list_infinite_scroll_component", text)
+        self.assertIn("paper_list_loaded_pages", text)
+        self.assertIn("paper_list_infinite_scroll_event", text)
+        self.assertIn('key=f"paper_row_more_details_{sid}"', text)
+        self.assertIn('"More details"', text)
+        self.assertIn('"Hide more details"', text)
+        self.assertIn('st.caption("Abstract")', text)
         self.assertIn('key=f"paper_row_details_{sid}"', text)
         self.assertIn('"Target Session"', text)
         self.assertIn("apply_paper_session_selection_edit", text)

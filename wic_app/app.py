@@ -737,39 +737,145 @@ def _apply_room_bulk_updates_if_changed(
     return True
 
 
+def _clear_room_sessions(day_label: str, room: str) -> Dict[str, object]:
+    day_label_clean = _normalize_text(day_label)
+    room_clean = _normalize_text(room)
+    if not day_label_clean or not room_clean:
+        return {"ok": False, "error": "Day label and room are required."}
+
+    rows = load_session_structure_rows(SESSION_STRUCTURE_FILE)
+    target_session_ids = {
+        session_id
+        for session_id, row in rows.items()
+        if _normalize_text(row.get("DayLabel", "")) == day_label_clean
+        and _normalize_text(row.get("Room", "")) == room_clean
+    }
+    if not target_session_ids:
+        return {"ok": False, "error": f"No sessions found for {room_clean} on {day_label_clean}."}
+
+    placements = load_paper_placements(PAPER_PLACEMENTS_FILE)
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    moved = 0
+    for row in placements.values():
+        if _normalize_text(row.get("SessionId", "")) not in target_session_ids:
+            continue
+        status = _normalize_text(row.get("PlacementStatus", "")).lower()
+        if status not in {"scheduled", "overflow"}:
+            continue
+        row["PlacementStatus"] = "unassigned"
+        row["SessionId"] = ""
+        row["TalkIndex"] = ""
+        row["OverflowOrder"] = ""
+        row["UpdatedAt"] = now
+        moved += 1
+
+    if moved > 0:
+        write_paper_placements(placements.values(), PAPER_PLACEMENTS_FILE)
+
+    return {
+        "ok": True,
+        "moved_to_unassigned": moved,
+        "session_count": len(target_session_ids),
+    }
+
+
+def _delete_room_sessions(day_label: str, room: str) -> Dict[str, object]:
+    day_label_clean = _normalize_text(day_label)
+    room_clean = _normalize_text(room)
+    if not day_label_clean or not room_clean:
+        return {"ok": False, "error": "Day label and room are required."}
+
+    rows = load_session_structure_rows(SESSION_STRUCTURE_FILE)
+    removed_session_ids = {
+        session_id
+        for session_id, row in rows.items()
+        if _normalize_text(row.get("DayLabel", "")) == day_label_clean
+        and _normalize_text(row.get("Room", "")) == room_clean
+    }
+    if not removed_session_ids:
+        return {"ok": False, "error": f"No sessions found for {room_clean} on {day_label_clean}."}
+
+    remaining_rows = {session_id: row for session_id, row in rows.items() if session_id not in removed_session_ids}
+    placements = load_paper_placements(PAPER_PLACEMENTS_FILE)
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    moved = 0
+    for row in placements.values():
+        if _normalize_text(row.get("SessionId", "")) not in removed_session_ids:
+            continue
+        status = _normalize_text(row.get("PlacementStatus", "")).lower()
+        if status not in {"scheduled", "overflow"}:
+            continue
+        row["PlacementStatus"] = "unassigned"
+        row["SessionId"] = ""
+        row["TalkIndex"] = ""
+        row["OverflowOrder"] = ""
+        row["UpdatedAt"] = now
+        moved += 1
+
+    if moved > 0:
+        write_paper_placements(placements.values(), PAPER_PLACEMENTS_FILE)
+    write_session_structure_rows(remaining_rows.values(), SESSION_STRUCTURE_FILE)
+
+    return {
+        "ok": True,
+        "deleted": len(removed_session_ids),
+        "moved_to_unassigned": moved,
+    }
+
+
 def _render_structure_session_inspector(state, session: object) -> None:
-    st.markdown("**Session**")
-    session_title = _normalize_text(getattr(session, "session_title", "")) or "[No title]"
-    st.markdown(f"### {session_title}")
+    st.caption("Session")
+    session_title_raw = _normalize_text(getattr(session, "session_title", ""))
+    session_title = session_title_raw or "[No title]"
+    title_edit_mode_key = f"struct_ins_session_title_edit_mode_{session.session_id}"
+    title_draft_key = f"struct_ins_session_title_draft_{session.session_id}"
+    title_col, edit_col = st.columns([8.6, 0.6], gap="small")
+    title_col.markdown(f"### {session_title}")
+    if edit_col.button(
+        "✎",
+        key=f"struct_ins_session_title_toggle_{session.session_id}",
+        help="Edit session title.",
+        use_container_width=True,
+    ):
+        next_mode = not bool(st.session_state.get(title_edit_mode_key, False))
+        st.session_state[title_edit_mode_key] = next_mode
+        if next_mode:
+            st.session_state[title_draft_key] = session_title_raw
+        st.rerun()
     st.caption(
         f"{session.session_code} | {session.day_label} | {session.block_label} | "
         f"{session.time} | {session.room}"
     )
+    if bool(st.session_state.get(title_edit_mode_key, False)):
+        if title_draft_key not in st.session_state:
+            st.session_state[title_draft_key] = session_title_raw
+        st.text_input("Session title", key=title_draft_key)
+        title_save_col, title_cancel_col = st.columns(2)
+        if title_save_col.button(
+            "Save title",
+            key=f"struct_ins_session_title_save_{session.session_id}",
+            use_container_width=True,
+        ):
+            new_title = _normalize_text(st.session_state.get(title_draft_key, ""))
+            st.session_state[title_edit_mode_key] = False
+            if _apply_session_name_override(session.session_code, new_title):
+                st.rerun()
+            st.info("No title changes detected.")
+        if title_cancel_col.button(
+            "Cancel",
+            key=f"struct_ins_session_title_cancel_{session.session_id}",
+            use_container_width=True,
+        ):
+            st.session_state[title_edit_mode_key] = False
+            st.session_state[title_draft_key] = session_title_raw
+            st.rerun()
+
     counts = structure_session_counts(session, unassigned_count=len(state.unassigned_papers))
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Filled", f"{counts['filled']}/{counts['capacity']}")
     c2.metric("Open slots", counts["open_slots"])
     c3.metric("Overflow", counts["overflow"])
     c4.metric("Potential fill", counts["potential_fill"])
-
-    st.markdown("---")
-    st.caption("Session Title")
-    title_key = f"struct_ins_session_title_{session.session_code}"
-    title_src = f"{title_key}_src"
-    current_title = _normalize_text(session.session_title)
-    if st.session_state.get(title_src) != current_title:
-        st.session_state[title_key] = current_title
-        st.session_state[title_src] = current_title
-    st.text_input("Session Title", key=title_key)
-    if st.button(
-        "Apply Session Title",
-        key=f"struct_ins_apply_title_{session.session_id}",
-        use_container_width=True,
-    ):
-        title = _normalize_text(st.session_state.get(title_key, ""))
-        if _apply_session_name_override(session.session_code, title):
-            st.rerun()
-        st.info("No title changes detected.")
 
     st.markdown("---")
     st.caption("Structure")
@@ -845,43 +951,71 @@ def _render_structure_session_inspector(state, session: object) -> None:
     st.markdown("---")
     st.caption("Lifecycle")
     if _normalize_text(getattr(session, "status", "active")).lower() == "active":
+        clear_pending_key = f"struct_ins_confirm_clear_pending_{session.session_id}"
+        remove_pending_key = f"struct_ins_confirm_remove_pending_{session.session_id}"
         life_left, life_right = st.columns(2)
-        confirm_clear = life_left.checkbox(
-            "Confirm clear",
-            key=f"struct_ins_confirm_clear_{session.session_id}",
-        )
         if life_left.button(
             "Clear Session",
             key=f"struct_ins_clear_{session.session_id}",
             use_container_width=True,
-            disabled=not confirm_clear,
         ):
-            _push_undo_snapshot()
-            result = clear_session(session.session_id)
-            if result.get("ok", False):
-                moved = int(result.get("moved_to_unassigned", 0) or 0)
-                _refresh_state(f"Cleared {session.session_code}; moved {moved} paper(s) to unassigned.")
+            st.session_state[clear_pending_key] = True
+            st.session_state[remove_pending_key] = False
+            st.rerun()
+        if bool(st.session_state.get(clear_pending_key, False)):
+            life_left.warning("Confirm clear session?")
+            if life_left.button(
+                "Confirm",
+                key=f"struct_ins_clear_confirm_{session.session_id}",
+                use_container_width=True,
+            ):
+                st.session_state[clear_pending_key] = False
+                _push_undo_snapshot()
+                result = clear_session(session.session_id)
+                if result.get("ok", False):
+                    moved = int(result.get("moved_to_unassigned", 0) or 0)
+                    _refresh_state(f"Cleared {session.session_code}; moved {moved} paper(s) to unassigned.")
+                    st.rerun()
+                st.error(str(result.get("error", "Failed to clear session.")))
+            if life_left.button(
+                "Cancel",
+                key=f"struct_ins_clear_cancel_{session.session_id}",
+                use_container_width=True,
+            ):
+                st.session_state[clear_pending_key] = False
                 st.rerun()
-            st.error(str(result.get("error", "Failed to clear session.")))
 
-        confirm_remove = life_right.checkbox(
-            "Confirm remove",
-            key=f"struct_ins_confirm_remove_{session.session_id}",
-        )
         if life_right.button(
             "Remove Session",
             key=f"struct_ins_remove_{session.session_id}",
             use_container_width=True,
-            disabled=not confirm_remove,
         ):
-            _push_undo_snapshot()
-            result = remove_session(session.session_id)
-            if result.get("ok", False):
-                moved = int(result.get("moved_to_unassigned", 0) or 0)
-                _refresh_state(f"Removed {session.session_code}; moved {moved} paper(s) to unassigned.")
-                _clear_structure_selection()
+            st.session_state[remove_pending_key] = True
+            st.session_state[clear_pending_key] = False
+            st.rerun()
+        if bool(st.session_state.get(remove_pending_key, False)):
+            life_right.warning("Confirm remove session?")
+            if life_right.button(
+                "Confirm",
+                key=f"struct_ins_remove_confirm_{session.session_id}",
+                use_container_width=True,
+            ):
+                st.session_state[remove_pending_key] = False
+                _push_undo_snapshot()
+                result = remove_session(session.session_id)
+                if result.get("ok", False):
+                    moved = int(result.get("moved_to_unassigned", 0) or 0)
+                    _refresh_state(f"Removed {session.session_code}; moved {moved} paper(s) to unassigned.")
+                    _clear_structure_selection()
+                    st.rerun()
+                st.error(str(result.get("error", "Failed to remove session.")))
+            if life_right.button(
+                "Cancel",
+                key=f"struct_ins_remove_cancel_{session.session_id}",
+                use_container_width=True,
+            ):
+                st.session_state[remove_pending_key] = False
                 st.rerun()
-            st.error(str(result.get("error", "Failed to remove session.")))
     else:
         if st.button(
             "Restore Session",
@@ -901,8 +1035,24 @@ def _render_structure_room_inspector(state, selection: Dict[str, object]) -> Non
     day_label = _normalize_text(selection.get("day_label", ""))
     room = _normalize_text(selection.get("room", ""))
 
-    st.markdown("**Room**")
-    st.caption(f"{room} | {day_label}")
+    st.caption("Room")
+    room_label = room or "[No room]"
+    room_edit_mode_key = f"struct_room_name_edit_mode_{day_label}_{room}"
+    room_draft_key = f"struct_room_name_draft_{day_label}_{room}"
+    title_col, edit_col = st.columns([8.6, 0.6], gap="small")
+    title_col.markdown(f"### {html.escape(room_label)}", unsafe_allow_html=True)
+    if edit_col.button(
+        "✎",
+        key=f"struct_room_rename_toggle_{day_label}_{room}",
+        help="Edit room name.",
+        use_container_width=True,
+    ):
+        next_mode = not bool(st.session_state.get(room_edit_mode_key, False))
+        st.session_state[room_edit_mode_key] = next_mode
+        if next_mode:
+            st.session_state[room_draft_key] = room
+        st.rerun()
+    st.caption(day_label)
 
     day_room_sessions = [
         session
@@ -916,42 +1066,129 @@ def _render_structure_room_inspector(state, selection: Dict[str, object]) -> Non
     m2.metric("Active this day", active_day)
     m3.metric("Inactive this day", inactive_day)
 
-    st.markdown("---")
-    st.caption("Room name")
-    rename_key = f"struct_room_rename_{day_label}_{room}"
-    rename_src_key = f"{rename_key}_src"
-    if st.session_state.get(rename_src_key) != room:
-        st.session_state[rename_key] = room
-        st.session_state[rename_src_key] = room
-    st.text_input("Room name", key=rename_key)
-    if st.button(
-        "Apply Room Rename",
-        key=f"struct_room_rename_apply_{day_label}_{room}",
-        use_container_width=True,
-    ):
-        new_room = _normalize_text(st.session_state.get(rename_key, ""))
-        snapshot = _snapshot_for_undo()
-        result = rename_room_for_day(
-            day_label=day_label,
-            room=room,
-            new_room=new_room,
-            config_path=_app_config_path(),
-        )
-        if result.get("ok", False):
-            updated = int(result.get("updated", 0) or 0)
-            if updated <= 0:
-                st.info("No room rename changes detected.")
-                return
-            _push_undo_snapshot(snapshot)
-            _set_structure_selection(
-                build_room_selection(
-                    day_label=day_label,
-                    room=new_room,
-                )
+    if bool(st.session_state.get(room_edit_mode_key, False)):
+        if room_draft_key not in st.session_state:
+            st.session_state[room_draft_key] = room
+        st.text_input("Room name", key=room_draft_key)
+        rename_save_col, rename_cancel_col = st.columns(2)
+        if rename_save_col.button(
+            "Save room name",
+            key=f"struct_room_rename_save_{day_label}_{room}",
+            use_container_width=True,
+        ):
+            new_room = _normalize_text(st.session_state.get(room_draft_key, ""))
+            st.session_state[room_edit_mode_key] = False
+            snapshot = _snapshot_for_undo()
+            result = rename_room_for_day(
+                day_label=day_label,
+                room=room,
+                new_room=new_room,
+                config_path=_app_config_path(),
             )
-            _refresh_state(f"Renamed room to {new_room} for {day_label} ({updated} session(s)).")
+            if result.get("ok", False):
+                updated = int(result.get("updated", 0) or 0)
+                if updated <= 0:
+                    st.info("No room rename changes detected.")
+                    return
+                _push_undo_snapshot(snapshot)
+                _set_structure_selection(
+                    build_room_selection(
+                        day_label=day_label,
+                        room=new_room,
+                    )
+                )
+                _refresh_state(f"Renamed room to {new_room} for {day_label} ({updated} session(s)).")
+                st.rerun()
+            st.error(str(result.get("error", "Failed to rename room for day.")))
+        if rename_cancel_col.button(
+            "Cancel",
+            key=f"struct_room_rename_cancel_{day_label}_{room}",
+            use_container_width=True,
+        ):
+            st.session_state[room_edit_mode_key] = False
+            st.session_state[room_draft_key] = room
             st.rerun()
-        st.error(str(result.get("error", "Failed to rename room for day.")))
+
+    st.markdown("---")
+    st.caption("Room Lifecycle")
+    clear_pending_key = f"struct_room_clear_pending_{day_label}_{room}"
+    delete_pending_key = f"struct_room_delete_pending_{day_label}_{room}"
+    has_room_sessions = len(day_room_sessions) > 0
+    lifecycle_col1, lifecycle_col2 = st.columns(2)
+    if lifecycle_col1.button(
+        "Clear Room Sessions",
+        key=f"struct_room_clear_{day_label}_{room}",
+        use_container_width=True,
+        disabled=not has_room_sessions,
+    ):
+        st.session_state[clear_pending_key] = True
+        st.session_state[delete_pending_key] = False
+        st.rerun()
+    if bool(st.session_state.get(clear_pending_key, False)):
+        lifecycle_col1.warning("Confirm clear room sessions?")
+        if lifecycle_col1.button(
+            "Confirm",
+            key=f"struct_room_clear_confirm_{day_label}_{room}",
+            use_container_width=True,
+        ):
+            st.session_state[clear_pending_key] = False
+            snapshot = _snapshot_for_undo()
+            result = _clear_room_sessions(day_label=day_label, room=room)
+            if result.get("ok", False):
+                moved = int(result.get("moved_to_unassigned", 0) or 0)
+                if moved > 0:
+                    _push_undo_snapshot(snapshot)
+                _refresh_state(f"Cleared room {room} on {day_label}; moved {moved} paper(s) to unassigned.")
+                st.rerun()
+            st.error(str(result.get("error", "Failed to clear room sessions.")))
+        if lifecycle_col1.button(
+            "Cancel",
+            key=f"struct_room_clear_cancel_{day_label}_{room}",
+            use_container_width=True,
+        ):
+            st.session_state[clear_pending_key] = False
+            st.rerun()
+
+    if lifecycle_col2.button(
+        "Delete Room Sessions",
+        key=f"struct_room_delete_{day_label}_{room}",
+        use_container_width=True,
+        disabled=not has_room_sessions,
+    ):
+        st.session_state[delete_pending_key] = True
+        st.session_state[clear_pending_key] = False
+        st.rerun()
+    if bool(st.session_state.get(delete_pending_key, False)):
+        lifecycle_col2.warning("Confirm delete room sessions?")
+        if lifecycle_col2.button(
+            "Confirm",
+            key=f"struct_room_delete_confirm_{day_label}_{room}",
+            use_container_width=True,
+        ):
+            st.session_state[delete_pending_key] = False
+            snapshot = _snapshot_for_undo()
+            result = _delete_room_sessions(day_label=day_label, room=room)
+            if result.get("ok", False):
+                deleted = int(result.get("deleted", 0) or 0)
+                moved = int(result.get("moved_to_unassigned", 0) or 0)
+                if deleted > 0 or moved > 0:
+                    _push_undo_snapshot(snapshot)
+                _clear_structure_selection()
+                _refresh_state(
+                    f"Deleted room {room} sessions on {day_label}; removed {deleted} session(s), moved {moved} paper(s)."
+                )
+                st.rerun()
+            st.error(str(result.get("error", "Failed to delete room sessions.")))
+        if lifecycle_col2.button(
+            "Cancel",
+            key=f"struct_room_delete_cancel_{day_label}_{room}",
+            use_container_width=True,
+        ):
+            st.session_state[delete_pending_key] = False
+            st.rerun()
+
+    if not has_room_sessions:
+        st.info("No sessions found for this room on the selected day.")
 
     st.markdown("---")
     st.caption("Add Room Sessions For Selected Day Blocks")
@@ -2087,11 +2324,6 @@ def _on_inspector_paper_fields_change(submission_id: str) -> None:
     _apply_classification_edits_if_changed(edited_df)
 
 
-def _on_inspector_session_title_change(session_code: str) -> None:
-    title = _normalize_text(st.session_state.get(f"ins_session_title_{session_code}", ""))
-    _apply_session_name_override(session_code, title)
-
-
 def _render_paper_slot_inspector(
     state,
     session: object,
@@ -2099,26 +2331,21 @@ def _render_paper_slot_inspector(
     paper: object,
     all_sessions: List[object],
 ) -> None:
-    st.markdown("**Paper Slot**")
+    st.caption("Paper")
+    title = _clean_display_text(paper.title) or "[No paper title]"
+    st.markdown(f"### {html.escape(title)}", unsafe_allow_html=True)
     st.caption(
         f"{session.session_code} | {session.time} | {session.room} | Slot {talk_index}"
     )
 
-    presenter = _clean_display_text(paper.full_name)
-    title = _clean_display_text(paper.title)
+    presenter = _clean_display_text(paper.full_name) or "[No presenter]"
     abstract_preview = _preview_abstract(paper.abstract)
     pdf_url = _normalize_text(paper.link_to_pdf)
+    st.caption(f"Presenter: {presenter}")
     if pdf_url.startswith("http"):
         st.markdown(
-            f"<b>{html.escape(presenter)}</b><br>"
             f"<a href='{html.escape(pdf_url)}' target='_blank' rel='noopener noreferrer' "
-            f"title='{html.escape(abstract_preview)}'>{html.escape(title)}</a>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            f"<b>{html.escape(presenter)}</b><br>"
-            f"<span title='{html.escape(abstract_preview)}'>{html.escape(title)}</span>",
+            f"title='Open paper in a new tab'>Open paper PDF</a>",
             unsafe_allow_html=True,
         )
     with st.expander("Abstract (click to expand)", expanded=False):
@@ -2288,22 +2515,50 @@ def _render_empty_slot_inspector(state, session: object, talk_index: int) -> Non
 
 
 def _render_session_inspector(state, session: object, all_sessions: List[object]) -> None:
-    st.markdown("**Session**")
+    st.caption("Session")
+    session_title_raw = _normalize_text(session.session_title)
+    session_title = _clean_display_text(session_title_raw) or "[No session title]"
+    title_edit_mode_key = f"ins_session_title_edit_mode_{session.session_id}"
+    title_draft_key = f"ins_session_title_draft_{session.session_id}"
+    title_col, edit_col = st.columns([8.6, 0.6], gap="small")
+    title_col.markdown(f"### {html.escape(session_title)}", unsafe_allow_html=True)
+    if edit_col.button(
+        "✎",
+        key=f"ins_session_title_toggle_{session.session_id}",
+        help="Edit session title.",
+        use_container_width=True,
+    ):
+        next_mode = not bool(st.session_state.get(title_edit_mode_key, False))
+        st.session_state[title_edit_mode_key] = next_mode
+        if next_mode:
+            st.session_state[title_draft_key] = session_title_raw
+        st.rerun()
+
     st.caption(f"{session.session_code} | {session.time} | {session.room}")
+    if bool(st.session_state.get(title_edit_mode_key, False)):
+        if title_draft_key not in st.session_state:
+            st.session_state[title_draft_key] = session_title_raw
+        st.text_input("Session title", key=title_draft_key)
+        title_save_col, title_cancel_col = st.columns(2)
+        if title_save_col.button(
+            "Save title",
+            key=f"ins_session_title_save_{session.session_id}",
+            use_container_width=True,
+        ):
+            new_title = _normalize_text(st.session_state.get(title_draft_key, ""))
+            st.session_state[title_edit_mode_key] = False
+            if _apply_session_name_override(session.session_code, new_title):
+                st.rerun()
+            st.info("No title changes detected.")
+        if title_cancel_col.button(
+            "Cancel",
+            key=f"ins_session_title_cancel_{session.session_id}",
+            use_container_width=True,
+        ):
+            st.session_state[title_edit_mode_key] = False
+            st.session_state[title_draft_key] = session_title_raw
+            st.rerun()
 
-    title_key = f"ins_session_title_{session.session_code}"
-    title_src = f"{title_key}_src"
-    current_title = _normalize_text(session.session_title)
-    if st.session_state.get(title_src) != current_title:
-        st.session_state[title_key] = current_title
-        st.session_state[title_src] = current_title
-
-    st.text_input(
-        "Session Title",
-        key=title_key,
-        on_change=_on_inspector_session_title_change,
-        args=(session.session_code,),
-    )
     st.caption(f"Theme: {session.primary_theme}")
     st.caption(f"Subtheme: {session.subtheme}")
     st.caption(f"Capacity: {session.capacity}")
@@ -2380,38 +2635,73 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
     st.markdown("---")
     st.caption("Session Lifecycle")
     action_col1, action_col2 = st.columns(2)
-    confirm_clear = action_col1.checkbox("Confirm clear", key=f"ins_confirm_clear_{session.session_id}")
+    clear_pending_key = f"ins_confirm_clear_pending_{session.session_id}"
+    remove_pending_key = f"ins_confirm_remove_pending_{session.session_id}"
     if action_col1.button(
         "Clear Session",
         key=f"ins_clear_session_{session.session_id}",
         use_container_width=True,
-        disabled=not confirm_clear,
     ):
-        snapshot = _snapshot_for_undo()
-        result = clear_session(session.session_id)
-        if not result.get("ok", False):
-            st.error(str(result.get("error", "Failed to clear session.")))
-        else:
-            _push_undo_snapshot(snapshot)
-            moved = int(result.get("moved_to_unassigned", 0) or 0)
-            _refresh_state(f"Cleared {session.session_code} and moved {moved} paper(s) to unassigned.")
+        st.session_state[clear_pending_key] = True
+        st.session_state[remove_pending_key] = False
+        st.rerun()
+    if bool(st.session_state.get(clear_pending_key, False)):
+        action_col1.warning("Confirm clear session?")
+        if action_col1.button(
+            "Confirm",
+            key=f"ins_clear_session_confirm_{session.session_id}",
+            use_container_width=True,
+        ):
+            st.session_state[clear_pending_key] = False
+            snapshot = _snapshot_for_undo()
+            result = clear_session(session.session_id)
+            if not result.get("ok", False):
+                st.error(str(result.get("error", "Failed to clear session.")))
+            else:
+                _push_undo_snapshot(snapshot)
+                moved = int(result.get("moved_to_unassigned", 0) or 0)
+                _refresh_state(f"Cleared {session.session_code} and moved {moved} paper(s) to unassigned.")
+                st.rerun()
+        if action_col1.button(
+            "Cancel",
+            key=f"ins_clear_session_cancel_{session.session_id}",
+            use_container_width=True,
+        ):
+            st.session_state[clear_pending_key] = False
             st.rerun()
-    confirm_remove = action_col2.checkbox("Confirm remove", key=f"ins_confirm_remove_{session.session_id}")
+
     if action_col2.button(
         "Remove Session",
         key=f"ins_remove_session_{session.session_id}",
         use_container_width=True,
-        disabled=not confirm_remove,
     ):
-        snapshot = _snapshot_for_undo()
-        result = remove_session(session.session_id)
-        if not result.get("ok", False):
-            st.error(str(result.get("error", "Failed to remove session.")))
-        else:
-            _push_undo_snapshot(snapshot)
-            _clear_programme_selection()
-            moved = int(result.get("moved_to_unassigned", 0) or 0)
-            _refresh_state(f"Removed {session.session_code}; {moved} paper(s) moved to unassigned.")
+        st.session_state[remove_pending_key] = True
+        st.session_state[clear_pending_key] = False
+        st.rerun()
+    if bool(st.session_state.get(remove_pending_key, False)):
+        action_col2.warning("Confirm remove session?")
+        if action_col2.button(
+            "Confirm",
+            key=f"ins_remove_session_confirm_{session.session_id}",
+            use_container_width=True,
+        ):
+            st.session_state[remove_pending_key] = False
+            snapshot = _snapshot_for_undo()
+            result = remove_session(session.session_id)
+            if not result.get("ok", False):
+                st.error(str(result.get("error", "Failed to remove session.")))
+            else:
+                _push_undo_snapshot(snapshot)
+                _clear_programme_selection()
+                moved = int(result.get("moved_to_unassigned", 0) or 0)
+                _refresh_state(f"Removed {session.session_code}; {moved} paper(s) moved to unassigned.")
+                st.rerun()
+        if action_col2.button(
+            "Cancel",
+            key=f"ins_remove_session_cancel_{session.session_id}",
+            use_container_width=True,
+        ):
+            st.session_state[remove_pending_key] = False
             st.rerun()
 
     st.markdown("---")
@@ -2501,18 +2791,10 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
 
 
 def _render_programme_inspector(state) -> None:
-    head1, head2 = st.columns([4, 1])
-    head1.markdown("### Inspector")
+    _, head2 = st.columns([4, 1])
     if head2.button("✕", key="close_inspector_btn", help="Close inspector", use_container_width=True):
         _clear_programme_selection()
         st.rerun()
-    st.caption("Selection-based editor from the programme grid.")
-
-    unassigned_count = len(state.unassigned_papers)
-    overflow_count = state.validations.get("overflow_papers", 0)
-    c1, c2 = st.columns(2)
-    c1.metric("Unassigned", unassigned_count)
-    c2.metric("Overflow", overflow_count)
 
     selection = st.session_state.get("programme_selection", {})
     if not isinstance(selection, dict) or not selection.get("session_id"):
@@ -2530,6 +2812,12 @@ def _render_programme_inspector(state) -> None:
     kind = _normalize_text(selection.get("kind", ""))
     if kind == "session":
         _render_session_inspector(state, session, all_sessions)
+        st.markdown("---")
+        unassigned_count = len(state.unassigned_papers)
+        overflow_count = state.validations.get("overflow_papers", 0)
+        c1, c2 = st.columns(2)
+        c1.metric("Unassigned", unassigned_count)
+        c2.metric("Overflow", overflow_count)
         return
 
     talk_index = int(selection.get("talk_index", 0) or 0)

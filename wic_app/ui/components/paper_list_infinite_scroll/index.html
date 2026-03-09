@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        overflow: hidden;
+        font-family: sans-serif;
+      }
+      #sentinel {
+        color: #5f6f86;
+        font-size: 0.8rem;
+        text-align: center;
+        padding: 6px 0;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="sentinel">Loading more papers...</div>
+    <script>
+      (function () {
+        const state = {
+          token: "",
+          enabled: false,
+          observer: null,
+          sentForToken: "",
+        };
+
+        function postMessage(type, payload) {
+          const message = Object.assign(
+            {
+              isStreamlitMessage: true,
+              type: type,
+            },
+            payload || {}
+          );
+          window.parent.postMessage(message, "*");
+        }
+
+        function setFrameHeight() {
+          const height = Math.max(28, document.body.scrollHeight || 28);
+          postMessage("streamlit:setFrameHeight", { height: height });
+        }
+
+        function setComponentValue(value) {
+          postMessage("streamlit:setComponentValue", { value: value });
+        }
+
+        function maybeSendToken() {
+          if (!state.enabled || !state.token) {
+            return;
+          }
+          if (state.sentForToken === state.token) {
+            return;
+          }
+          state.sentForToken = state.token;
+          setComponentValue(state.token);
+        }
+
+        function installObserver() {
+          if (state.observer) {
+            state.observer.disconnect();
+            state.observer = null;
+          }
+          if (!state.enabled || !state.token) {
+            return;
+          }
+
+          let frameElement = null;
+          try {
+            frameElement = window.frameElement;
+          } catch (err) {
+            frameElement = null;
+          }
+          if (!frameElement) {
+            return;
+          }
+
+          try {
+            const parentWindow = window.parent;
+            if (!parentWindow || !parentWindow.IntersectionObserver) {
+              return;
+            }
+            state.observer = new parentWindow.IntersectionObserver(
+              function (entries) {
+                entries.forEach(function (entry) {
+                  if (entry.isIntersecting && entry.intersectionRatio > 0) {
+                    maybeSendToken();
+                  }
+                });
+              },
+              {
+                root: null,
+                threshold: 0.6,
+              }
+            );
+            state.observer.observe(frameElement);
+          } catch (err) {
+            // Keep component quiet if the browser blocks cross-frame observation.
+          }
+        }
+
+        function updateLabel() {
+          const sentinel = document.getElementById("sentinel");
+          if (!sentinel) {
+            return;
+          }
+          sentinel.style.display = state.enabled ? "block" : "none";
+          sentinel.textContent = state.enabled ? "Loading more papers..." : "";
+        }
+
+        function onRender(event) {
+          const data = event.data;
+          if (!data || data.type !== "streamlit:render") {
+            return;
+          }
+          const args = data.args || {};
+          state.token = String(args.token || "");
+          state.enabled = Boolean(args.enabled);
+          state.sentForToken = "";
+          updateLabel();
+          installObserver();
+          setFrameHeight();
+        }
+
+        window.addEventListener("message", onRender);
+        postMessage("streamlit:componentReady", { apiVersion: 1 });
+        setFrameHeight();
+      })();
+    </script>
+  </body>
+</html>

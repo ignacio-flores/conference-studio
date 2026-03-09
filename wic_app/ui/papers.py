@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 import html
+from pathlib import Path
 import re
 from typing import Callable, Dict, Iterable, List, Tuple
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 WHITESPACE_RE = re.compile(r"\s+")
+PAPER_LIST_PAGE_SIZE = 20
+PAPER_LIST_INFINITE_SCROLL_COMPONENT_DIR = (
+    Path(__file__).resolve().parent / "components" / "paper_list_infinite_scroll"
+)
+paper_list_infinite_scroll_component = components.declare_component(
+    "paper_list_infinite_scroll",
+    path=str(PAPER_LIST_INFINITE_SCROLL_COMPONENT_DIR),
+)
 
 
 def _normalize_text(value: object) -> str:
@@ -201,6 +211,16 @@ def default_session_option_for_paper(
     return candidate if session_id and candidate in options_set else default
 
 
+def _render_paper_list_infinite_scroll(token: str, enabled: bool) -> str:
+    value = paper_list_infinite_scroll_component(
+        token=_normalize_text(token),
+        enabled=bool(enabled),
+        key="paper_list_infinite_scroll",
+        default="",
+    )
+    return _normalize_text(value)
+
+
 def render_paper_list_tab(
     state,
     edited_ids: Iterable[str],
@@ -241,16 +261,59 @@ def render_paper_list_tab(
         st.info("No papers match the current filters.")
         return
 
-    filtered = filtered.sort_values(by=["Day", "Block", "Room", "SessionCode", "FullName"], kind="stable")
-    st.caption(f"Showing {len(filtered)} paper(s).")
+    filtered = filtered.sort_values(by=["Day", "Block", "Room", "SessionCode", "FullName"], kind="stable").reset_index(drop=True)
 
+    page_key = "paper_list_loaded_pages"
+    page_signature_key = "paper_list_page_signature"
+    page_event_key = "paper_list_infinite_scroll_event"
+    page_signature = "|".join(
+        [
+            _normalize_text(theme_filter),
+            _normalize_text(subtheme_filter),
+            _normalize_text(day_filter),
+            _normalize_text(block_filter),
+            _normalize_text(room_filter),
+            "1" if show_not_edited_only else "0",
+            _normalize_text(query).lower(),
+        ]
+    )
+    if _normalize_text(st.session_state.get(page_signature_key, "")) != page_signature:
+        st.session_state[page_signature_key] = page_signature
+        st.session_state[page_key] = 1
+        st.session_state[page_event_key] = ""
+
+    detail_key = "paper_list_detail_submission_id"
+    detail_sid = _normalize_text(st.session_state.get(detail_key, ""))
     edit_key = "paper_list_edit_submission_id"
     edit_sid = _normalize_text(st.session_state.get(edit_key, ""))
     session_options, session_labels = build_session_options(state)
     visible_ids = set(filtered["SubmissionID"].astype(str).tolist())
+    if detail_sid and detail_sid not in visible_ids:
+        st.session_state[detail_key] = ""
+        detail_sid = ""
     if edit_sid and edit_sid not in visible_ids:
         st.session_state[edit_key] = ""
         edit_sid = ""
+    if edit_sid and detail_sid != edit_sid:
+        st.session_state[detail_key] = edit_sid
+        detail_sid = edit_sid
+
+    total_rows = len(filtered)
+    total_pages = max(1, (total_rows + PAPER_LIST_PAGE_SIZE - 1) // PAPER_LIST_PAGE_SIZE)
+    try:
+        loaded_pages = int(st.session_state.get(page_key, 1))
+    except (TypeError, ValueError):
+        loaded_pages = 1
+    loaded_pages = max(1, min(loaded_pages, total_pages))
+
+    st.session_state[page_key] = loaded_pages
+
+    page_end = min(loaded_pages * PAPER_LIST_PAGE_SIZE, total_rows)
+    filtered_page = filtered.iloc[:page_end]
+
+    st.caption(
+        f"Showing {page_end} of {total_rows} paper(s) · Loaded pages {loaded_pages}/{total_pages}"
+    )
 
     header_cols = st.columns([2.2, 3.2, 1.8, 1.2, 2.0, 0.8], gap="small")
     header_cols[0].markdown("**Presenter**")
@@ -260,11 +323,12 @@ def render_paper_list_tab(
     header_cols[4].markdown("**Placement**")
     header_cols[5].markdown("**Details**")
 
-    for row in filtered.to_dict(orient="records"):
+    for row in filtered_page.to_dict(orient="records"):
         sid = _normalize_text(row.get("SubmissionID", ""))
         if not sid:
             continue
         public_row = paper_public_row(row)
+        is_details_open = detail_sid == sid
         is_editing = edit_sid == sid
         row_cols = st.columns([2.2, 3.2, 1.8, 1.2, 2.0, 0.8], gap="small")
         row_cols[0].markdown(public_row["PresenterHTML"], unsafe_allow_html=True)
@@ -276,22 +340,46 @@ def render_paper_list_tab(
             f"{public_row['Day']} | {public_row['Block']} | {public_row['Room']}"
         )
         row_cols[4].caption(_clip_text(placement, 86))
+        details_label = "Hide" if is_details_open else "Details"
         if row_cols[5].button(
-            "Details",
+            details_label,
             key=f"paper_row_details_{sid}",
             use_container_width=True,
         ):
-            st.session_state[edit_key] = sid
+            if is_details_open:
+                st.session_state[detail_key] = ""
+                if is_editing:
+                    st.session_state[edit_key] = ""
+            else:
+                st.session_state[detail_key] = sid
+                st.session_state[edit_key] = ""
             st.rerun()
 
-        if not is_editing:
+        if not (is_details_open or is_editing):
             continue
 
         with st.container(border=True):
-            st.caption("Edit Paper")
+            st.caption("Abstract")
             abstract = _clean_text(row.get("Abstract", "")) or "No abstract provided."
-            with st.expander("Abstract", expanded=True):
-                st.write(abstract)
+            st.write(abstract)
+
+            more_details_label = "Hide more details" if is_editing else "More details"
+            if st.button(
+                more_details_label,
+                key=f"paper_row_more_details_{sid}",
+                use_container_width=False,
+            ):
+                if is_editing:
+                    st.session_state[edit_key] = ""
+                else:
+                    st.session_state[detail_key] = sid
+                    st.session_state[edit_key] = sid
+                st.rerun()
+
+            if not is_editing:
+                continue
+
+            st.caption("Edit Paper")
 
             e_meta_1, e_meta_2 = st.columns([2, 3], gap="small")
             new_author = e_meta_1.text_input(
@@ -365,3 +453,13 @@ def render_paper_list_tab(
             if cancel_col.button("Cancel", key=f"paper_edit_cancel_{sid}", use_container_width=True):
                 st.session_state[edit_key] = ""
                 st.rerun()
+
+    has_more_pages = loaded_pages < total_pages
+    if has_more_pages:
+        st.caption("Scroll down to load more papers automatically.")
+        scroll_token = f"{page_signature}:{loaded_pages}:{total_pages}:{page_end}"
+        scroll_value = _render_paper_list_infinite_scroll(token=scroll_token, enabled=True)
+        if scroll_value == scroll_token and _normalize_text(st.session_state.get(page_event_key, "")) != scroll_token:
+            st.session_state[page_event_key] = scroll_token
+            st.session_state[page_key] = min(total_pages, loaded_pages + 1)
+            st.rerun()

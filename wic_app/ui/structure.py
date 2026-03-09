@@ -341,16 +341,10 @@ def render_structure_inspector(
     render_new_room_panel: Callable[[Dict[str, object]], None],
     clear_selection: Callable[[], None],
 ) -> None:
-    head1, head2 = st.columns([4, 1])
-    head1.markdown("### Structure Inspector")
+    _, head2 = st.columns([4, 1])
     if head2.button("✕", key="close_structure_inspector_btn", help="Close inspector", use_container_width=True):
         clear_selection()
         st.rerun()
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Active sessions", len(state.sessions))
-    c2.metric("Inactive sessions", len(state.inactive_sessions))
-    c3.metric("Unassigned papers", len(state.unassigned_papers))
 
     kind = _normalize_text(selection.get("kind", "") if isinstance(selection, dict) else "").lower()
     if kind == "session":
