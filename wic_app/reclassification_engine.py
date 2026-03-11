@@ -43,6 +43,8 @@ SESSION_STRUCTURE_FILE = STATE_DIR / "session_structure.csv"
 PAPER_PLACEMENTS_FILE = STATE_DIR / "paper_placements.csv"
 PAPER_METADATA_OVERRIDES_FILE = STATE_DIR / "paper_metadata_overrides.csv"
 MANUAL_TALKS_FILE = STATE_DIR / "manual_talks.csv"
+LABEL_CATALOG_FILE = STATE_DIR / "label_catalog.csv"
+EMPTY_LABEL_SENTINEL = "__WIC_EMPTY_LABEL__"
 
 DRAFT_OUTPUT_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("draft_output", "WIC2026_Programme_Draft.xlsx")
 PUBLISH_XLSX_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("publish_xlsx_output", "WIC2026_Programme_Publish.xlsx")
@@ -409,6 +411,10 @@ MANUAL_TALKS_HEADERS = [
     "ReviewerScore",
     "UpdatedAt",
 ]
+
+LABEL_TYPE_PRIMARY = "primary"
+LABEL_TYPE_SECONDARY = "secondary"
+LABEL_CATALOG_HEADERS = ["LabelType", "LabelValue", "UpdatedAt"]
 
 
 @dataclass
@@ -887,6 +893,7 @@ def ensure_state_files(
     paper_placements_file: Path = PAPER_PLACEMENTS_FILE,
     paper_metadata_overrides_file: Path = PAPER_METADATA_OVERRIDES_FILE,
     manual_talks_file: Path = MANUAL_TALKS_FILE,
+    label_catalog_file: Path = LABEL_CATALOG_FILE,
 ) -> None:
     state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -925,6 +932,11 @@ def ensure_state_files(
             writer = csv.DictWriter(f, fieldnames=MANUAL_TALKS_HEADERS)
             writer.writeheader()
 
+    if not label_catalog_file.exists():
+        with label_catalog_file.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=LABEL_CATALOG_HEADERS)
+            writer.writeheader()
+
 
 def _load_csv_rows(path: Path, expected_headers: List[str]) -> List[Dict[str, str]]:
     if not path.exists():
@@ -937,6 +949,95 @@ def _load_csv_rows(path: Path, expected_headers: List[str]) -> List[Dict[str, st
         for row in reader:
             rows.append({h: (row.get(h, "") or "").strip() for h in expected_headers})
     return rows
+
+
+def _normalize_label_type(value: object) -> str:
+    label_type = str(value or "").strip().lower()
+    return label_type if label_type in {LABEL_TYPE_PRIMARY, LABEL_TYPE_SECONDARY} else ""
+
+
+def load_label_catalog(path: Path = LABEL_CATALOG_FILE) -> Dict[str, List[str]]:
+    rows = _load_csv_rows(path, LABEL_CATALOG_HEADERS)
+    labels_by_type = {
+        LABEL_TYPE_PRIMARY: set(),
+        LABEL_TYPE_SECONDARY: set(),
+    }
+    for row in rows:
+        label_type = _normalize_label_type(row.get("LabelType", ""))
+        if not label_type:
+            continue
+        value = str(row.get("LabelValue", "")).strip()
+        if not value:
+            continue
+        labels_by_type[label_type].add(value)
+
+    return {
+        LABEL_TYPE_PRIMARY: sorted(labels_by_type[LABEL_TYPE_PRIMARY], key=str.casefold),
+        LABEL_TYPE_SECONDARY: sorted(labels_by_type[LABEL_TYPE_SECONDARY], key=str.casefold),
+    }
+
+
+def write_label_catalog(
+    catalog: Dict[str, Iterable[str]],
+    path: Path = LABEL_CATALOG_FILE,
+) -> None:
+    normalized = {
+        LABEL_TYPE_PRIMARY: set(),
+        LABEL_TYPE_SECONDARY: set(),
+    }
+    for label_type in (LABEL_TYPE_PRIMARY, LABEL_TYPE_SECONDARY):
+        for value in list(catalog.get(label_type, []) or []):
+            cleaned = str(value or "").strip()
+            if cleaned:
+                normalized[label_type].add(cleaned)
+
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=LABEL_CATALOG_HEADERS)
+        writer.writeheader()
+        for label_type in (LABEL_TYPE_PRIMARY, LABEL_TYPE_SECONDARY):
+            for value in sorted(normalized[label_type], key=str.casefold):
+                writer.writerow(
+                    {
+                        "LabelType": label_type,
+                        "LabelValue": value,
+                        "UpdatedAt": now,
+                    }
+                )
+
+
+def merge_label_catalog_labels(
+    primary_values: Iterable[str],
+    secondary_values: Iterable[str],
+    path: Path = LABEL_CATALOG_FILE,
+) -> bool:
+    existing = load_label_catalog(path)
+    current_primary = set(existing.get(LABEL_TYPE_PRIMARY, []))
+    current_secondary = set(existing.get(LABEL_TYPE_SECONDARY, []))
+    merged_primary = set(current_primary)
+    merged_secondary = set(current_secondary)
+
+    for value in list(primary_values or []):
+        cleaned = str(value or "").strip()
+        if cleaned:
+            merged_primary.add(cleaned)
+    for value in list(secondary_values or []):
+        cleaned = str(value or "").strip()
+        if cleaned:
+            merged_secondary.add(cleaned)
+
+    if merged_primary == current_primary and merged_secondary == current_secondary:
+        return False
+
+    write_label_catalog(
+        {
+            LABEL_TYPE_PRIMARY: merged_primary,
+            LABEL_TYPE_SECONDARY: merged_secondary,
+        },
+        path=path,
+    )
+    return True
 
 
 def load_classification_overrides(path: Path = CLASSIFICATION_OVERRIDES_FILE) -> Dict[str, Dict[str, str]]:
@@ -2453,6 +2554,7 @@ def classify_papers(
         keyword_matches=keyword_matches,
         theme_keywords=THEME_KEYWORDS,
         parse_bool=parse_bool,
+        empty_label_sentinel=EMPTY_LABEL_SENTINEL,
     )
 
 

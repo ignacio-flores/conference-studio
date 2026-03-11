@@ -1,80 +1,80 @@
 SubmissionID,OverridePrimaryTheme,OverrideSubtheme,Reviewed,OverrideNotes,UpdatedAt
 0Q505JN,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
-0QDJvXQ,Global wealth distribution dynamics,"Asset Prices, Returns and Portfolio Dynamics",False,,2026-03-06T13:49:47
+0QDJvXQ,Global inequality,"Asset Prices, Returns and Portfolio Dynamics",True,,2026-03-11T08:05:00
 0QgvpgN,Gender inequality,"Care Work, Household Dynamics and Time Use",False,,2026-03-06T13:49:47
 0QgyXB9,Taxation and tax evasion,Wealth Taxation and Capital Income Tax Design,False,,2026-03-06T13:49:47
-0Qyb44N,Factors contributing to income inequalities,"Macroeconomic Drivers: Inflation, Growth and Cycles",False,,2026-03-06T13:49:47
-1AgYRRb,Global wealth distribution dynamics,"Savings, Capital Accumulation and Wealth Mobility",False,,2026-03-06T13:49:47
+0Qyb44N,Drivers,"Macroeconomic Drivers: Inflation, Growth and Cycles",True,,2026-03-11T08:05:12
+1AgYRRb,Global inequality,"Savings, Capital Accumulation and Wealth Mobility",True,,2026-03-11T08:05:00
 1Age6QL,Political inequalities,"Polarization, Media and Democratic Trust",False,,2026-03-06T13:49:47
 1AxJ75M,Political inequalities,Political Inequalities - General,False,,2026-03-06T13:49:47
-2E5697V,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
+2E5697V,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 2EgDeOA,Gender inequality,Gender Wage Gaps and Labor Income Inequality,False,,2026-03-06T13:49:47
 2EgE4MD,Gender inequality,"Care Work, Household Dynamics and Time Use",False,,2026-03-06T13:49:47
 2EgN5gD,Taxation and tax evasion,"Tax Incidence, Redistribution and Welfare Effects",False,,2026-03-06T13:49:47
-2EgReqM,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-2EgVxqb,Factors contributing to income inequalities,"Firm Dynamics, Market Power and Productivity",False,,2026-03-06T13:49:47
+2EgReqM,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+2EgVxqb,Drivers,"Firm Dynamics, Market Power and Productivity",True,,2026-03-11T08:05:12
 2EgY8qL,Taxation and tax evasion,Taxation and Evasion - General,False,,2026-03-06T13:49:47
-2Egzk19,Global wealth distribution dynamics,Global Wealth Convergence and Divergence,False,,2026-03-06T13:49:47
-2EyMXEe,Factors contributing to income inequalities,"Macroeconomic Drivers: Inflation, Growth and Cycles",False,,2026-03-06T13:49:47
-2EyQyyV,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-44DEyOA,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
+2Egzk19,Global inequality,Global Wealth Convergence and Divergence,True,,2026-03-11T08:05:00
+2EyMXEe,Drivers,"Macroeconomic Drivers: Inflation, Growth and Cycles",True,,2026-03-11T08:05:12
+2EyQyyV,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+44DEyOA,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
 44DRNBX,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
-44DYXok,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
+44DYXok,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
 44DYy4o,Political inequalities,Political Inequalities - General,False,,2026-03-06T13:49:47
-44DplqY,Factors contributing to income inequalities,"Firm Dynamics, Market Power and Productivity",False,,2026-03-06T13:49:47
+44DplqY,Drivers,"Firm Dynamics, Market Power and Productivity",True,,2026-03-11T08:05:12
 44qQ8GO,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 44ygrrY,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
 44yjQv5,Gender inequality,Gender Inequality - General,False,,2026-03-06T13:49:47
-44ypvj5,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
+44ypvj5,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
 5BD7vQN,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 5BDJJdo,Taxation and tax evasion,Wealth Taxation and Capital Income Tax Design,False,,2026-03-06T13:49:47
-5Bg17Dv,Factors contributing to income inequalities,"Education, Skills and Human Capital Channels",False,,2026-03-06T13:49:47
+5Bg17Dv,Inequality dynamics,Public goods,True,,2026-03-11T08:03:14
 5Bg6lKE,Land inequality,"Agricultural Productivity, Smallholders and Rural Inequality",False,,2026-03-06T13:49:47
-5BgY1Zv,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
+5BgY1Zv,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
 5BgYe9Q,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 5BgoxeE,Taxation and tax evasion,"Tax Incidence, Redistribution and Welfare Effects",False,,2026-03-06T13:49:47
-5Bgr8lN,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
-5BgzD9o,Global wealth distribution dynamics,"Savings, Capital Accumulation and Wealth Mobility",False,,2026-03-06T13:49:47
-68yD66P,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
+5Bgr8lN,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
+5BgzD9o,Global inequality,"Savings, Capital Accumulation and Wealth Mobility",True,,2026-03-11T08:05:00
+68yD66P,Income and wealth mobility,Class mobility (U.S.),True,,2026-03-10T13:27:34
 68yD9rB,Taxation and tax evasion,"Corporate Taxation, Profit Shifting and Evasion",False,,2026-03-06T13:49:47
 68ylgQY,Gender inequality,Gender Wage Gaps and Labor Income Inequality,False,,2026-03-06T13:49:47
-68zO8Le,Methodological advances in inequality measurement,Distributional Decomposition and Counterfactual Methods,False,,2026-03-06T13:49:47
-68zW0ve,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
-68zWvgo,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-7Re8D86,Factors contributing to income inequalities,"Technology, Automation and Digital Transformation",False,,2026-03-06T13:49:47
-7Rej2Mz,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-7Rggv1a,Factors contributing to income inequalities,"Technology, Automation and Digital Transformation",False,,2026-03-06T13:49:47
+68zO8Le,Methods and measurement,Distributional Decomposition and Counterfactual Methods,True,,2026-03-11T08:03:34
+68zW0ve,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
+68zWvgo,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+7Re8D86,Drivers,"Technology, Automation and Digital Transformation",True,,2026-03-11T08:05:12
+7Rej2Mz,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+7Rggv1a,Drivers,"Technology, Automation and Digital Transformation",True,,2026-03-11T08:05:12
 7RgzQG9,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
-7RzYoq0,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
+7RzYoq0,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
 815BbXA,Taxation and tax evasion,Taxation and Evasion - General,False,,2026-03-06T13:49:47
-81g9ZWP,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
+81g9ZWP,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
 81ggORz,Taxation and tax evasion,"Corporate Taxation, Profit Shifting and Evasion",False,,2026-03-06T13:49:47
-81ggqEz,Measurement of historical income and wealth inequality dynamics,Distributional National Accounts and Data Infrastructure,False,,2026-03-06T13:49:47
+81ggqEz,Inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-11T08:03:14
 81gyGV5,Taxation and tax evasion,Wealth Taxation and Capital Income Tax Design,False,,2026-03-06T13:49:47
-81y9oQo,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
+81y9oQo,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
 9qgPvG1,Environmental inequalities,Environmental Inequalities - General,False,,2026-03-06T13:49:47
-9qgdlA4,Factors contributing to income inequalities,"Macroeconomic Drivers: Inflation, Growth and Cycles",False,,2026-03-06T13:49:47
-9qgpV2G,Income and wealth mobility,"Wealth Mobility, Inheritance and Class Persistence",False,,2026-03-06T13:49:47
+9qgdlA4,Drivers,"Macroeconomic Drivers: Inflation, Growth and Cycles",True,,2026-03-11T08:05:12
+9qgpV2G,Income and wealth mobility,Wealth Mobility,True,,2026-03-10T13:25:24
 A7G1gLo,Gender inequality,"Gendered Institutions, Norms and Social Exclusion",False,,2026-03-06T13:49:47
-A7OD9ky,Measurement of historical income and wealth inequality dynamics,Historical Measurement - General,False,,2026-03-06T13:49:47
-A7OGVKk,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,True,,2026-03-06T14:48:22
-A7OGvQk,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
+A7OD9ky,Inequality dynamics,Historical Measurement - General,True,,2026-03-11T08:03:14
+A7OGVKk,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
+A7OGvQk,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
 A7ONzke,Gender inequality,"Care Work, Household Dynamics and Time Use",False,,2026-03-06T13:49:47
 A7OOPE0,Inequality perceptions,Perceptions of Fairness and Social Mobility,False,,2026-03-06T13:49:47
 A7OY7j0,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
-A7OlqYl,Methodological advances in inequality measurement,Advanced Panel and Time-Series Methods,False,,2026-03-06T13:49:47
+A7OlqYl,Methods and measurement,Advanced Panel and Time-Series Methods,True,,2026-03-11T08:03:34
 A7ydRzN,Income and wealth mobility,Income Mobility Over the Life Cycle,False,,2026-03-06T13:49:47
 BzVkvRA,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
-BzVp2X5,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
-Bzl2NWY,Global wealth distribution dynamics,"Asset Prices, Returns and Portfolio Dynamics",False,,2026-03-06T13:49:47
+BzVp2X5,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
+Bzl2NWY,Global inequality,"Asset Prices, Returns and Portfolio Dynamics",True,,2026-03-11T08:05:00
 BzlyMM5,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 D4EAr65,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
-D4EyxBl,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
-D4P8yg5,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
+D4EyxBl,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
+D4P8yg5,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
 D4PMAGl,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 D4PQ47E,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
-D4YrzYj,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-EkEP7gA,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
+D4YrzYj,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+EkEP7gA,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
 EkEjqMq,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
 EkezORA,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
 Ekg7Jgr,Gender inequality,Gender Inequality - General,False,,2026-03-06T13:49:47
@@ -84,215 +84,215 @@ EkrELQX,Environmental inequalities,Carbon Pricing and Climate Policy Distributio
 EkrG9Kr,Gender inequality,Gender Wage Gaps and Labor Income Inequality,False,,2026-03-06T13:49:47
 EkrGEaL,Gender inequality,"Care Work, Household Dynamics and Time Use",False,,2026-03-06T13:49:47
 EkrJ1BN,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
-EkrbWJA,Global wealth distribution dynamics,"Asset Prices, Returns and Portfolio Dynamics",False,,2026-03-06T13:49:47
-Gx4ZDa2,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
+EkrbWJA,Global inequality,"Asset Prices, Returns and Portfolio Dynamics",True,,2026-03-11T08:05:00
+Gx4ZDa2,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
 GxQeWpZ,Gender inequality,"Care Work, Household Dynamics and Time Use",False,,2026-03-06T13:49:47
-Gxj5oOz,Factors contributing to income inequalities,"Education, Skills and Human Capital Channels",False,,2026-03-06T13:49:47
+Gxj5oOz,Drivers,"Education, Skills and Human Capital Channels",True,,2026-03-11T08:05:12
 GxjA2qQ,Taxation and tax evasion,Wealth Taxation and Capital Income Tax Design,False,,2026-03-06T13:49:47
-GxjBl2O,Factors contributing to income inequalities,"Education, Skills and Human Capital Channels",False,,2026-03-06T13:49:47
-GxjQd7k,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-GxjapeO,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
-GxjqYRj,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
-J9ZGAe7,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-J9ZYKrR,Global wealth distribution dynamics,Global Wealth Dynamics - General,False,,2026-03-06T13:49:47
+GxjBl2O,Drivers,"Education, Skills and Human Capital Channels",True,,2026-03-11T08:05:12
+GxjQd7k,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+GxjapeO,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
+GxjqYRj,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
+J9ZGAe7,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+J9ZYKrR,Global inequality,Global Wealth Dynamics - General,True,,2026-03-11T08:05:00
 J9ZbOJR,Inequality perceptions,"Information, Narratives and Belief Formation",False,,2026-03-06T13:49:47
 J9Zbpbo,Gender inequality,"Care Work, Household Dynamics and Time Use",False,,2026-03-06T13:49:47
 J9Zr2k7,Taxation and tax evasion,"Tax Incidence, Redistribution and Welfare Effects",False,,2026-03-06T13:49:47
-J9xP0gd,Global wealth distribution dynamics,"Asset Prices, Returns and Portfolio Dynamics",False,,2026-03-06T13:49:47
-KYN4OW8,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
-KYN4ovk,Measurement of historical income and wealth inequality dynamics,Historical Measurement - General,False,,2026-03-06T13:49:47
+J9xP0gd,Global inequality,"Asset Prices, Returns and Portfolio Dynamics",True,,2026-03-11T08:05:00
+KYN4OW8,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
+KYN4ovk,Inequality dynamics,Historical Measurement - General,True,,2026-03-11T08:03:14
 KYNAvjD,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
-KYNNdpX,Factors contributing to income inequalities,"Technology, Automation and Digital Transformation",False,,2026-03-06T13:49:47
-KYNOVO7,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
+KYNNdpX,Drivers,"Technology, Automation and Digital Transformation",True,,2026-03-11T08:05:12
+KYNOVO7,Drivers,Labour shares,True,,2026-03-11T08:05:12
 KYNOoWg,Taxation and tax evasion,"Corporate Taxation, Profit Shifting and Evasion",False,,2026-03-06T13:49:47
 KYNZdQM,Inequality perceptions,"Information, Narratives and Belief Formation",False,,2026-03-06T13:49:47
 KYRaz5g,Gender inequality,"Care Work, Household Dynamics and Time Use",False,,2026-03-06T13:49:47
-KYyv2jV,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
-LZqBvrJ,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
+KYyv2jV,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
+LZqBvrJ,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
 LZqJ8L2,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
-MeQ29aE,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
+MeQ29aE,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 MeQYA1g,Environmental inequalities,Emissions Accounting and Environmental Footprints,False,,2026-03-06T13:49:47
-MeQbbg0,Global wealth distribution dynamics,"Savings, Capital Accumulation and Wealth Mobility",False,,2026-03-06T13:49:47
+MeQbbg0,Global inequality,"Savings, Capital Accumulation and Wealth Mobility",True,,2026-03-11T08:05:00
 MeQlKA0,Political inequalities,"Voting, Participation and Electoral Cleavages",False,,2026-03-06T13:49:47
-MeQlkME,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
-Meq4xYX,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
+MeQlkME,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
+Meq4xYX,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
 MeqXd0k,Gender inequality,Gender Inequality - General,False,,2026-03-06T13:49:47
 NpQaJYb,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
 NpgjoVB,Taxation and tax evasion,"Tax Compliance, Administration and Enforcement",False,,2026-03-06T13:49:47
-OD9Wga7,Measurement of historical income and wealth inequality dynamics,Historical Measurement - General,False,,2026-03-06T13:49:47
+OD9Wga7,Inequality dynamics,Historical Measurement - General,True,,2026-03-11T08:03:14
 ODe87qp,Income and wealth mobility,"Mobility Traps, Segregation and Stratification",False,,2026-03-06T13:49:47
 ODe98Y7,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
-ODeAXPK,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
+ODeAXPK,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
 ODeEEQ8,Gender inequality,Gender Wage Gaps and Labor Income Inequality,False,,2026-03-06T13:49:47
 ODeK8YR,Inequality perceptions,Experimental and Survey Evidence on Inequality Attitudes,False,,2026-03-06T13:49:47
-ODeV2PR,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
+ODeV2PR,Drivers,Labour shares,True,,2026-03-11T08:05:12
 ODeZ8Z8,Gender inequality,"Care Work, Household Dynamics and Time Use",False,,2026-03-06T13:49:47
 ODerGpk,Inequality perceptions,Experimental and Survey Evidence on Inequality Attitudes,False,,2026-03-06T13:49:47
 PdPYZNQ,Taxation and tax evasion,Taxation and Evasion - General,False,,2026-03-06T13:49:47
-PdWJZG0,Factors contributing to income inequalities,"Macroeconomic Drivers: Inflation, Growth and Cycles",False,,2026-03-06T13:49:47
-PdWLjGe,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
+PdWJZG0,Drivers,"Macroeconomic Drivers: Inflation, Growth and Cycles",True,,2026-03-11T08:05:12
+PdWLjGe,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
 PdWyE6b,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
-Pde76Gb,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
-PdelMQ5,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
-PdexX7e,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
+Pde76Gb,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
+PdelMQ5,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
+PdexX7e,Income and wealth mobility,Wealth mobility (FR),True,Historical series,2026-03-10T13:28:47
 Pdg2Zbe,Political inequalities,"Polarization, Media and Democratic Trust",False,,2026-03-06T13:49:47
-QKXojZA,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
+QKXojZA,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 QKaJA1G,Taxation and tax evasion,"Corporate Taxation, Profit Shifting and Evasion",False,,2026-03-06T13:49:47
-QKaaeKA,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
+QKaaeKA,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
 QKaq9OA,Taxation and tax evasion,Taxation and Evasion - General,False,,2026-03-06T13:49:47
-QKarvEX,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
+QKarvEX,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
 QKj2jxA,Political inequalities,"Voting, Participation and Electoral Cleavages",False,,2026-03-06T13:49:47
-QKjXqWg,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
-RG2yxaK,Measurement of historical income and wealth inequality dynamics,Distributional National Accounts and Data Infrastructure,False,,2026-03-06T13:49:47
+QKjXqWg,Income and wealth mobility,Income/Education mobility,True,,2026-03-10T13:30:20
+RG2yxaK,Inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-11T08:03:14
 RG6Q5MP,Political inequalities,"Voting, Participation and Electoral Cleavages",False,,2026-03-06T13:49:47
-RG6QXQp,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
-RG6QpLp,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-RG6VqXv,Global wealth distribution dynamics,Global Wealth Dynamics - General,False,,2026-03-06T13:49:47
+RG6QXQp,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
+RG6QpLp,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+RG6VqXv,Global inequality,Global Wealth Dynamics - General,True,,2026-03-11T08:05:00
 RG6aBWd,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
-RG6bKDj,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
+RG6bKDj,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
 RG6gYEl,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
 RG6lNed,Environmental inequalities,"Climate Justice, Vulnerability and Adaptation",False,,2026-03-06T13:49:47
 VLADOPy,Taxation and tax evasion,"Corporate Taxation, Profit Shifting and Evasion",True,,2026-03-06T14:48:22
-VLB68eN,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
+VLB68eN,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
 VLB6Eqa,Land inequality,"Agricultural Productivity, Smallholders and Rural Inequality",False,,2026-03-06T13:49:47
 VLBAeZ6,Political inequalities,Political Economy of Redistribution,False,,2026-03-06T13:49:47
 VLBXQea,Inequality perceptions,Inequality Perceptions - General,False,,2026-03-06T13:49:47
 VLBaRe6,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
-VLBdD1E,Factors contributing to income inequalities,"Technology, Automation and Digital Transformation",False,,2026-03-06T13:49:47
+VLBdD1E,Drivers,"Technology, Automation and Digital Transformation",True,,2026-03-11T08:05:12
 VLBveLa,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
-VLBxL4g,Factors contributing to income inequalities,"Technology, Automation and Digital Transformation",False,,2026-03-06T13:49:47
-VLBy6eN,Factors contributing to income inequalities,"Firm Dynamics, Market Power and Productivity",False,,2026-03-06T13:49:47
-WOZoQLj,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-WOgqP8e,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
+VLBxL4g,Drivers,"Technology, Automation and Digital Transformation",True,,2026-03-11T08:05:12
+VLBy6eN,Drivers,"Firm Dynamics, Market Power and Productivity",True,,2026-03-11T08:05:12
+WOZoQLj,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+WOgqP8e,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
 WOk6qvP,Inequality perceptions,Perceptions of Fairness and Social Mobility,False,,2026-03-06T13:49:47
-WOkBD0k,Measurement of historical income and wealth inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-06T14:48:22
-WOkXNGJ,Measurement of historical income and wealth inequality dynamics,Historical Measurement - General,False,,2026-03-06T13:49:47
+WOkBD0k,Inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-11T08:03:14
+WOkXNGJ,Inequality dynamics,Historical Measurement - General,True,,2026-03-11T08:03:14
 WOkYB8J,Political inequalities,Political Inequalities - General,False,,2026-03-06T13:49:47
-WOkj14j,Factors contributing to income inequalities,"Macroeconomic Drivers: Inflation, Growth and Cycles",False,,2026-03-06T13:49:47
-WOkpMgj,Factors contributing to income inequalities,"Education, Skills and Human Capital Channels",True,,2026-03-06T14:48:22
-Xx8gDX4,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
-XxkaKRY,Measurement of historical income and wealth inequality dynamics,Historical Measurement - General,False,,2026-03-06T13:49:47
-Xxkpb0d,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
+WOkj14j,Drivers,"Macroeconomic Drivers: Inflation, Growth and Cycles",True,,2026-03-11T08:05:12
+WOkpMgj,Drivers,Outsourcing,True,,2026-03-11T08:05:12
+Xx8gDX4,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
+XxkaKRY,Inequality dynamics,Historical Measurement - General,True,,2026-03-11T08:03:14
+Xxkpb0d,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 XxvYZZP,Taxation and tax evasion,"Tax Incidence, Redistribution and Welfare Effects",False,,2026-03-06T13:49:47
-Y5KKgVW,Factors contributing to income inequalities,"Technology, Automation and Digital Transformation",False,,2026-03-06T13:49:47
-Y5Kbkad,Factors contributing to income inequalities,"Macroeconomic Drivers: Inflation, Growth and Cycles",False,,2026-03-06T13:49:47
+Y5KKgVW,Drivers,"Technology, Automation and Digital Transformation",True,,2026-03-11T08:05:12
+Y5Kbkad,Drivers,"Macroeconomic Drivers: Inflation, Growth and Cycles",True,,2026-03-11T08:05:12
 Y5vANd0,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
-Y5voxBJ,Methodological advances in inequality measurement,"Data Fusion, Harmonization and Measurement Error",False,,2026-03-06T13:49:47
-ZjL7d20,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
-ZjLAB8B,Measurement of historical income and wealth inequality dynamics,Distributional National Accounts and Data Infrastructure,False,,2026-03-06T13:49:47
-ZjLgXeV,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
-ZjLr46e,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
+Y5voxBJ,Methods and measurement,"Data Fusion, Harmonization and Measurement Error",True,,2026-03-11T08:03:34
+ZjL7d20,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
+ZjLAB8B,Inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-11T08:03:14
+ZjLgXeV,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
+ZjLr46e,Inequality dynamics,Automation,True,,2026-03-11T08:03:14
 ZjLzKpz,Political inequalities,"Polarization, Media and Democratic Trust",True,,2026-03-06T14:48:22
 ZjZE81e,Taxation and tax evasion,Wealth Taxation and Capital Income Tax Design,False,,2026-03-06T13:49:47
 Zjyk77V,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
-aQPXB0b,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
+aQPXB0b,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
 aQPgxav,Taxation and tax evasion,"Tax Incidence, Redistribution and Welfare Effects",False,,2026-03-06T13:49:47
-aQgBVO9,Factors contributing to income inequalities,"Macroeconomic Drivers: Inflation, Growth and Cycles",False,,2026-03-06T13:49:47
+aQgBVO9,Drivers,"Macroeconomic Drivers: Inflation, Growth and Cycles",True,,2026-03-11T08:05:12
 b56X580,Taxation and tax evasion,"Tax Compliance, Administration and Enforcement",False,,2026-03-06T13:49:47
 b5EEB2Z,Land inequality,"Agricultural Productivity, Smallholders and Rural Inequality",False,,2026-03-06T13:49:47
-b5EEplg,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-b5EMBxE,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
+b5EEplg,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+b5EMBxE,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 b5EMdag,Gender inequality,Gender Inequality - General,False,,2026-03-06T13:49:47
 b5ypLWo,Inequality perceptions,Perceptions of Fairness and Social Mobility,False,,2026-03-06T13:49:47
-dW1M8Wz,Methodological advances in inequality measurement,Distributional Decomposition and Counterfactual Methods,False,,2026-03-06T13:49:47
-dW1ybVN,Measurement of historical income and wealth inequality dynamics,Land inequality,True,,2026-03-09T21:29:48
+dW1M8Wz,Methods and measurement,Distributional Decomposition and Counterfactual Methods,True,,2026-03-11T08:03:34
+dW1ybVN,Inequality dynamics,Land inequality,True,,2026-03-11T08:03:14
 dW412MN,Taxation and tax evasion,"Corporate Taxation, Profit Shifting and Evasion",False,,2026-03-06T13:49:47
-dW41vvN,Factors contributing to income inequalities,"Education, Skills and Human Capital Channels",False,,2026-03-06T13:49:47
+dW41vvN,Drivers,"Education, Skills and Human Capital Channels",True,,2026-03-11T08:05:12
 dW47gjd,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 dW4jBMD,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
 dWpbRAV,Environmental inequalities,"Climate Justice, Vulnerability and Adaptation",False,,2026-03-06T13:49:47
 eq86Lox,Taxation and tax evasion,"Tax Compliance, Administration and Enforcement",False,,2026-03-06T13:49:47
 eqj724E,Gender inequality,Gender Wage Gaps and Labor Income Inequality,False,,2026-03-06T13:49:47
-eqjjA9o,Factors contributing to income inequalities,"Education, Skills and Human Capital Channels",False,,2026-03-06T13:49:47
+eqjjA9o,Inequality dynamics,Discrimination (caste),True,,2026-03-11T08:03:14
 eqjr15x,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
-eqjxgDl,Measurement of historical income and wealth inequality dynamics,Historical Measurement - General,False,,2026-03-06T13:49:47
+eqjxgDl,Inequality dynamics,Historical Measurement - General,True,,2026-03-11T08:03:14
 eqjy54k,Taxation and tax evasion,Wealth Taxation and Capital Income Tax Design,False,,2026-03-06T13:49:47
 eqjydAO,Environmental inequalities,Environmental Inequalities - General,False,,2026-03-06T13:49:47
-gD1E0ED,Methodological advances in inequality measurement,"Data Fusion, Harmonization and Measurement Error",False,,2026-03-06T13:49:47
-gDplN0D,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
+gD1E0ED,Methods and measurement,"Data Fusion, Harmonization and Measurement Error",True,,2026-03-11T08:03:34
+gDplN0D,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
 gDrpqZJ,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
-gDx5JaN,Measurement of historical income and wealth inequality dynamics,Regional and Global Comparison of Inequality Trajectories,False,,2026-03-06T13:49:47
-gDxxKyK,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-jaXDylY,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
+gDx5JaN,Inequality dynamics,Regional and Global Comparison of Inequality Trajectories,True,,2026-03-11T08:03:14
+gDxxKyK,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+jaXDylY,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 jaYd8W6,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
-jagovdQ,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
-jaqEpx6,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
+jagovdQ,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
+jaqEpx6,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 jaqLBa4,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
 jaqNON9,Political inequalities,Political Inequalities - General,False,,2026-03-06T13:49:47
 jaqWYB6,Gender inequality,"Gendered Institutions, Norms and Social Exclusion",False,,2026-03-06T13:49:47
 jaqjP1J,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
 jaqp4oY,Inequality perceptions,Experimental and Survey Evidence on Inequality Attitudes,False,,2026-03-06T13:49:47
-kdQ4Gx1,Measurement of historical income and wealth inequality dynamics,Distributional National Accounts and Data Infrastructure,False,,2026-03-06T13:49:47
-kdQrJdJ,Measurement of historical income and wealth inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-06T14:48:22
+kdQ4Gx1,Inequality dynamics,Sectoral bargaining,True,,2026-03-11T08:03:14
+kdQrJdJ,Inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-11T08:03:14
 kdpjbPr,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
 kdxb6Xd,Gender inequality,"Care Work, Household Dynamics and Time Use",False,,2026-03-06T13:49:47
-lb1G8vk,Measurement of historical income and wealth inequality dynamics,Regional and Global Comparison of Inequality Trajectories,False,,2026-03-06T13:49:47
+lb1G8vk,Inequality dynamics,Regional and Global Comparison of Inequality Trajectories,True,,2026-03-11T08:03:14
 lb1aE66,Taxation and tax evasion,"Corporate Taxation, Profit Shifting and Evasion",False,,2026-03-06T13:49:47
 lb91oKV,Taxation and tax evasion,"Tax Incidence, Redistribution and Welfare Effects",False,,2026-03-06T13:49:47
 lb9g5OV,Gender inequality,"Gendered Institutions, Norms and Social Exclusion",False,,2026-03-06T13:49:47
-lbY5DWV,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
+lbY5DWV,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
 ob1JeoM,Environmental inequalities,"Energy Transition, Fossil Lock-in and Decarbonization",False,,2026-03-06T13:49:47
 ob1WyWO,Environmental inequalities,"Energy Transition, Fossil Lock-in and Decarbonization",False,,2026-03-06T13:49:47
-ob1jKBM,Factors contributing to income inequalities,"Education, Skills and Human Capital Channels",False,,2026-03-06T13:49:47
-obQjNYb,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-obY68YO,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-obaEXbO,Measurement of historical income and wealth inequality dynamics,Distributional National Accounts and Data Infrastructure,False,,2026-03-06T13:49:47
+ob1jKBM,Drivers,"Education, Skills and Human Capital Channels",True,,2026-03-11T08:05:12
+obQjNYb,Drivers,Bargaining Power,True,,2026-03-11T08:05:12
+obY68YO,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+obaEXbO,Inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-11T08:03:14
 obaQWR1,Taxation and tax evasion,"Corporate Taxation, Profit Shifting and Evasion",False,,2026-03-06T13:49:47
 obaRReb,Taxation and tax evasion,"Tax Incidence, Redistribution and Welfare Effects",False,,2026-03-06T13:49:47
-obaVMYx,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
-obaZ8DM,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
-obaZLLM,Methodological advances in inequality measurement,Distributional Decomposition and Counterfactual Methods,False,,2026-03-06T13:49:47
-obaaMBx,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
+obaVMYx,Income and wealth mobility,Perceived mobility,True,,2026-03-10T13:31:40
+obaZ8DM,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
+obaZLLM,Methods and measurement,Distributional Decomposition and Counterfactual Methods,True,,2026-03-11T08:03:34
+obaaMBx,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
 obaaVOP,Gender inequality,"Gendered Institutions, Norms and Social Exclusion",False,,2026-03-06T13:49:47
-obadaB1,Factors contributing to income inequalities,"Macroeconomic Drivers: Inflation, Growth and Cycles",False,,2026-03-06T13:49:47
-obaxVWO,Factors contributing to income inequalities,"Education, Skills and Human Capital Channels",False,,2026-03-06T13:49:47
-pb69AGZ,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",True,,2026-03-06T14:48:22
-pb69W6V,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
+obadaB1,Drivers,"Macroeconomic Drivers: Inflation, Growth and Cycles",True,,2026-03-11T08:05:12
+obaxVWO,Drivers,Discrimination (castes),True,,2026-03-11T08:05:12
+pb69AGZ,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+pb69W6V,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 pb69xgb,Inequality perceptions,Inequality Perceptions - General,False,,2026-03-06T13:49:47
-pb6Ex68,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
-pb6PR48,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-pb6kZZJ,Measurement of historical income and wealth inequality dynamics,Historical Measurement - General,False,,2026-03-06T13:49:47
+pb6Ex68,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
+pb6PR48,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+pb6kZZJ,Inequality dynamics,Historical Measurement - General,True,,2026-03-11T08:03:14
 q47X7Ek,Political inequalities,"Voting, Participation and Electoral Cleavages",False,,2026-03-06T13:49:47
 q47XQa2,Gender inequality,"Gendered Institutions, Norms and Social Exclusion",False,,2026-03-06T13:49:47
-q47bbqg,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
+q47bbqg,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
 q47qVE7,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
-q47qlvO,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
+q47qlvO,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
 q4k6egd,Gender inequality,"Gender, Violence and Bodily Autonomy",False,,2026-03-06T13:49:47
 q4p1Wl8,Environmental inequalities,Environmental Inequalities - General,False,,2026-03-06T13:49:47
-rj1Nqdp,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
-rjYXeXo,Global wealth distribution dynamics,Global Wealth Convergence and Divergence,False,,2026-03-06T13:49:47
-rjbBqgv,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",True,,2026-03-06T14:48:22
-rjbQdvL,Methodological advances in inequality measurement,Methodological Innovations in Inequality Research,False,,2026-03-06T13:49:47
-rjbb9N5,Factors contributing to income inequalities,"Technology, Automation and Digital Transformation",False,,2026-03-06T13:49:47
+rj1Nqdp,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
+rjYXeXo,Global inequality,Global Wealth Convergence and Divergence,True,,2026-03-11T08:05:00
+rjbBqgv,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+rjbQdvL,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
+rjbb9N5,Drivers,"Technology, Automation and Digital Transformation",True,,2026-03-11T08:05:12
 vGbOvov,Political inequalities,"Voting, Participation and Electoral Cleavages",False,,2026-03-06T13:49:47
-vGvVg08,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
+vGvVg08,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
 vGvVkWd,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 vGvaRMQ,Environmental inequalities,Environmental Inequalities - General,False,,2026-03-06T13:49:47
 vGvx94g,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 xX6y5Xv,Inequality perceptions,Experimental and Survey Evidence on Inequality Attitudes,False,,2026-03-06T13:49:47
-xXL7QXk,Measurement of historical income and wealth inequality dynamics,"Top Incomes, Wealth Shares and Concentration",False,,2026-03-06T13:49:47
+xXL7QXk,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
 xXL7jBk,Political inequalities,"Polarization, Media and Democratic Trust",False,,2026-03-06T13:49:47
 xXLB87v,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
-xXLBNeG,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-xXLEDGy,Factors contributing to income inequalities,"Firm Dynamics, Market Power and Productivity",False,,2026-03-06T13:49:47
-xXLEbd9,Measurement of historical income and wealth inequality dynamics,Historical Series and Archives,False,,2026-03-06T13:49:47
-xXLLlly,Factors contributing to income inequalities,"Education, Skills and Human Capital Channels",False,,2026-03-06T13:49:47
-xXLWW85,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
-xXLzaqG,Factors contributing to income inequalities,"Macroeconomic Drivers: Inflation, Growth and Cycles",False,,2026-03-06T13:49:47
+xXLBNeG,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+xXLEDGy,Drivers,"Firm Dynamics, Market Power and Productivity",True,,2026-03-11T08:05:12
+xXLEbd9,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
+xXLLlly,Drivers,"Education, Skills and Human Capital Channels",True,,2026-03-11T08:05:12
+xXLWW85,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
+xXLzaqG,Drivers,"Macroeconomic Drivers: Inflation, Growth and Cycles",True,,2026-03-11T08:05:12
 xXo7z9J,Taxation and tax evasion,"Corporate Taxation, Profit Shifting and Evasion",False,,2026-03-06T13:49:47
 yPpbLz8,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 yPpbzo8,Taxation and tax evasion,"Tax Incidence, Redistribution and Welfare Effects",False,,2026-03-06T13:49:47
 yPpr78p,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
-zx4XMME,Measurement of historical income and wealth inequality dynamics,Distributional National Accounts and Data Infrastructure,False,,2026-03-06T13:49:47
-zxOapRg,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
+zx4XMME,Inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-11T08:03:14
+zxOapRg,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 zxRA6V8,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
-zxRR80a,Factors contributing to income inequalities,"Technology, Automation and Digital Transformation",False,,2026-03-06T13:49:47
-zxRb7qa,Factors contributing to income inequalities,"Education, Skills and Human Capital Channels",False,,2026-03-06T13:49:47
-zxRbM51,Factors contributing to income inequalities,"Education, Skills and Human Capital Channels",False,,2026-03-06T13:49:47
+zxRR80a,Drivers,"Technology, Automation and Digital Transformation",True,,2026-03-11T08:05:12
+zxRb7qa,Drivers,"Education, Skills and Human Capital Channels",True,,2026-03-11T08:05:12
+zxRbM51,Drivers,"Education, Skills and Human Capital Channels",True,,2026-03-11T08:05:12
 zxvBrNE,Taxation and tax evasion,Wealth Taxation and Capital Income Tax Design,False,,2026-03-06T13:49:47
-ASEntry1,Factors contributing to income inequalities,"Labor Markets, Wages and Bargaining Power",False,,2026-03-06T13:49:47
+ASEntry1,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 ASEntry2,Gender inequality,Gender Wage Gaps and Labor Income Inequality,False,,2026-03-06T13:49:47
-ASEntry3,Measurement of historical income and wealth inequality dynamics,Historical Measurement - General,False,,2026-03-06T13:49:47
+ASEntry3,Inequality dynamics,Measurement bias,True,,2026-03-11T08:03:14
 ASEntry4,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
 ASEntry5,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 ASEntry6,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47

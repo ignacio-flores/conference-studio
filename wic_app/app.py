@@ -15,6 +15,8 @@ from engine.config import load_conference_config
 from exporters.publish import export_draft_workbook, export_publish_excel, export_publish_pdf
 from reclassification_engine import (
     CLASSIFICATION_OVERRIDES_FILE,
+    EMPTY_LABEL_SENTINEL,
+    LABEL_CATALOG_FILE,
     MANUAL_TALKS_FILE,
     PAPER_METADATA_OVERRIDES_FILE,
     PAPER_PLACEMENTS_FILE,
@@ -34,6 +36,7 @@ from reclassification_engine import (
     format_minutes,
     load_manual_talks,
     load_classification_overrides,
+    load_label_catalog,
     load_paper_metadata_overrides,
     load_paper_placements,
     load_session_structure_rows,
@@ -49,12 +52,14 @@ from reclassification_engine import (
     update_session_structure_row,
     validate_session_structure_rows,
     write_classification_overrides,
+    write_label_catalog,
     write_paper_metadata_overrides,
     write_paper_placements,
     write_session_structure_rows,
     write_session_name_overrides,
 )
 from ui.actions import render_top_actions
+from ui.labels import render_labels_tab
 from ui.papers import render_paper_list_tab
 from ui.programme import render_programme_tab as render_programme_tab_view
 from ui.structure import (
@@ -81,7 +86,7 @@ HTML_TAG_RE = re.compile(r"<[^>]+>")
 WHITESPACE_RE = re.compile(r"\s+")
 
 APP_TITLE = "Conference Studio"
-TAB_LABELS = ["Programme", "Structure", "Paper List", "Checks"]
+TAB_LABELS = ["Programme", "Structure", "Paper List", "Labels", "Checks"]
 UNDO_STACK_LIMIT = 20
 DEFAULT_CONFERENCE_LABEL = "WIC 2026"
 UI_SETTINGS_FILE = Path(__file__).resolve().parent / "state" / "ui_settings.json"
@@ -111,6 +116,11 @@ div.stButton > button[kind="primary"]:focus {
 
 def _normalize_text(value: object) -> str:
     return str(value or "").strip()
+
+
+def _classification_override_value(value: object) -> str:
+    cleaned = _normalize_text(value)
+    return cleaned if cleaned else EMPTY_LABEL_SENTINEL
 
 
 def _strip_html_fragments(value: object) -> str:
@@ -214,6 +224,7 @@ def _init_session_state() -> None:
 def _snapshot_for_undo() -> Dict[str, object]:
     tracked_files = [
         CLASSIFICATION_OVERRIDES_FILE,
+        LABEL_CATALOG_FILE,
         SESSION_NAME_OVERRIDES_FILE,
         PROGRAMME_LAYOUT_OVERRIDES_FILE,
         SESSION_STRUCTURE_FILE,
@@ -313,8 +324,8 @@ def _apply_classification_edits_if_changed(edited_df: pd.DataFrame) -> bool:
 
         existing_overrides[sid] = {
             "SubmissionID": sid,
-            "OverridePrimaryTheme": theme,
-            "OverrideSubtheme": subtheme,
+            "OverridePrimaryTheme": _classification_override_value(theme),
+            "OverrideSubtheme": _classification_override_value(subtheme),
             "Reviewed": "True",
             "OverrideNotes": notes,
             "UpdatedAt": now,
@@ -2938,6 +2949,14 @@ elif active_tab == "Paper List":
         apply_classification_edits_if_changed=_apply_classification_edits_if_changed,
         apply_paper_metadata_edits_if_changed=_apply_paper_metadata_edits_if_changed,
         apply_paper_session_selection_edit=_apply_paper_session_selection_edit,
+    )
+elif active_tab == "Labels":
+    render_labels_tab(
+        state=state,
+        theme_order=THEME_ORDER,
+        load_label_catalog_fn=load_label_catalog,
+        write_label_catalog_fn=write_label_catalog,
+        apply_classification_edits_if_changed=_apply_classification_edits_if_changed,
     )
 else:
     _quality_panel(edited_count=edited_count, not_edited_count=not_edited_count)

@@ -407,7 +407,11 @@ def render_paper_list_tab(
             )
 
             st.caption("Classification")
-            theme_options = list(theme_order)
+            theme_options = [""]
+            for candidate in list(theme_order):
+                cleaned = _normalize_text(candidate)
+                if cleaned and cleaned not in theme_options:
+                    theme_options.append(cleaned)
             current_theme = _normalize_text(row.get("PrimaryTheme", ""))
             if current_theme and current_theme not in theme_options:
                 theme_options = [current_theme] + theme_options
@@ -417,6 +421,7 @@ def render_paper_list_tab(
                 "PrimaryTheme",
                 options=theme_options,
                 index=theme_index,
+                format_func=lambda value: value or "[No label]",
                 key=f"paper_edit_theme_{sid}",
             )
             new_subtheme = e2.text_input(
