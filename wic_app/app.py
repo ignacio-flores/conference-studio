@@ -59,6 +59,7 @@ from reclassification_engine import (
     write_session_name_overrides,
 )
 from ui.actions import render_top_actions
+from ui.inspector_layout import inject_sticky_inspector_css, render_inspector_marker
 from ui.labels import render_labels_tab
 from ui.papers import render_paper_list_tab
 from ui.programme import render_programme_tab as render_programme_tab_view
@@ -112,6 +113,7 @@ div.stButton > button[kind="primary"]:focus {
 """,
     unsafe_allow_html=True,
 )
+inject_sticky_inspector_css()
 
 
 def _normalize_text(value: object) -> str:
@@ -1700,6 +1702,7 @@ def _render_structure_tab(state) -> None:
         with left_col:
             _render_matrix()
         with right_col:
+            render_inspector_marker("structure")
             render_structure_inspector(
                 state=state,
                 selection=selection,
@@ -2342,28 +2345,24 @@ def _render_paper_slot_inspector(
     paper: object,
     all_sessions: List[object],
 ) -> None:
-    st.caption("Paper")
+    st.caption(f"Paper - Slot {talk_index} - Session {session.session_code}")
     title = _clean_display_text(paper.title) or "[No paper title]"
-    st.markdown(f"### {html.escape(title)}", unsafe_allow_html=True)
-    st.caption(
-        f"{session.session_code} | {session.time} | {session.room} | Slot {talk_index}"
-    )
-
-    presenter = _clean_display_text(paper.full_name) or "[No presenter]"
-    abstract_preview = _preview_abstract(paper.abstract)
     pdf_url = _normalize_text(paper.link_to_pdf)
-    st.caption(f"Presenter: {presenter}")
     if pdf_url.startswith("http"):
         st.markdown(
-            f"<a href='{html.escape(pdf_url)}' target='_blank' rel='noopener noreferrer' "
-            f"title='Open paper in a new tab'>Open paper PDF</a>",
+            f"#### <a href='{html.escape(pdf_url)}' target='_blank' rel='noopener noreferrer'>{html.escape(title)}</a>",
             unsafe_allow_html=True,
         )
+    else:
+        st.markdown(
+            f"#### {html.escape(title)}",
+            unsafe_allow_html=True,
+        )
+    presenter = _clean_display_text(paper.full_name) or "[No presenter]"
+    abstract_preview = _preview_abstract(paper.abstract)
+    st.caption(f"Presenter: {presenter} - {session.time} - {session.room}")
     with st.expander("Abstract (click to expand)", expanded=False):
         st.write(abstract_preview or "[No abstract provided]")
-
-    st.markdown("---")
-    st.caption("Classification")
 
     theme_options = list(THEME_ORDER)
     if paper.primary_theme and paper.primary_theme not in theme_options:
@@ -2400,16 +2399,6 @@ def _render_paper_slot_inspector(
         on_change=_on_inspector_paper_fields_change,
         args=(paper.submission_id,),
     )
-    st.text_area(
-        "Notes",
-        key=notes_key,
-        height=100,
-        on_change=_on_inspector_paper_fields_change,
-        args=(paper.submission_id,),
-    )
-
-    st.markdown("---")
-    st.caption("Placement")
     if all_sessions:
         session_ids = [s.session_id for s in all_sessions]
         default_idx = session_ids.index(session.session_id) if session.session_id in session_ids else 0
@@ -2449,7 +2438,6 @@ def _render_paper_slot_inspector(
             ):
                 st.rerun()
 
-    st.caption("If the target slot/session is full, the move is kept as overflow and flagged in Checks.")
     if st.button("Drop To Unassigned", key=f"ins_drop_{paper.submission_id}", use_container_width=True):
         if _apply_layout_updates(
                 {
@@ -2463,6 +2451,13 @@ def _render_paper_slot_inspector(
             f"Moved {paper.submission_id} to unassigned.",
         ):
             st.rerun()
+    st.text_area(
+        "Notes",
+        key=notes_key,
+        height=80,
+        on_change=_on_inspector_paper_fields_change,
+        args=(paper.submission_id,),
+    )
 
 
 def _render_empty_slot_inspector(state, session: object, talk_index: int) -> None:

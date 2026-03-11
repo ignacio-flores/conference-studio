@@ -5,6 +5,8 @@ from typing import Callable, List
 import pandas as pd
 import streamlit as st
 
+from ui.inspector_layout import render_inspector_marker
+
 PROGRAMME_COLUMN_OPTIONS = ["Auto", "1", "2", "3", "4", "5", "6"]
 
 
@@ -123,6 +125,7 @@ def render_programme_tab(
         with left_col:
             _render_grid_content()
         with right_col:
+            render_inspector_marker("programme")
             render_programme_inspector(state)
     else:
         _render_grid_content()
