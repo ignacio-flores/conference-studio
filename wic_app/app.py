@@ -59,7 +59,7 @@ from reclassification_engine import (
     write_session_name_overrides,
 )
 from ui.actions import render_top_actions
-from ui.inspector_layout import inject_sticky_inspector_css, render_inspector_marker
+from ui.inspector_layout import inject_sticky_inspector_css
 from ui.labels import render_labels_tab
 from ui.papers import render_paper_list_tab
 from ui.programme import render_programme_tab as render_programme_tab_view
@@ -207,6 +207,8 @@ def _init_session_state() -> None:
         st.session_state.flash_message = ""
     if "structure_selection" not in st.session_state:
         st.session_state.structure_selection = {}
+    if "structure_inspector_open" not in st.session_state:
+        st.session_state.structure_inspector_open = False
     if "active_tab" not in st.session_state or st.session_state.active_tab not in TAB_LABELS:
         st.session_state.active_tab = TAB_LABELS[0]
     settings = _load_ui_settings()
@@ -682,10 +684,12 @@ def _undo_last_change() -> bool:
 
 def _set_structure_selection(selection: Dict[str, object]) -> None:
     st.session_state.structure_selection = dict(selection)
+    st.session_state.structure_inspector_open = True
 
 
 def _clear_structure_selection() -> None:
     st.session_state.structure_selection = {}
+    st.session_state.structure_inspector_open = False
 
 
 def _apply_room_bulk_updates_if_changed(
@@ -1448,7 +1452,7 @@ def _render_structure_tab(state) -> None:
         format_func=lambda value: value.title(),
         key="structure_status_filter",
     )
-    search_text = filter_col5.text_input("Search SessionCode/Room", "", key="structure_search")
+    search_text = filter_col5.text_input("Search SessionTitle/SessionCode/Room", "", key="structure_search")
     block_options = block_filter_labels_for_day(
         all_sessions,
         day_label=day_pick,
@@ -1686,9 +1690,39 @@ def _render_structure_tab(state) -> None:
     def _on_select_new_room() -> None:
         _set_structure_selection(build_new_room_selection(day_pick))
 
+    all_rooms = list(matrix_data.get("rooms", []) if isinstance(matrix_data, dict) else [])
+    matrix_rows = list(matrix_data.get("rows", []) if isinstance(matrix_data, dict) else [])
+    matrix_view_data = {"rooms": all_rooms, "rows": matrix_rows}
+
+    if all_rooms:
+        selected_room_defaults = [
+            room
+            for room in st.session_state.get("structure_selected_rooms", all_rooms)
+            if room in all_rooms
+        ]
+        if not selected_room_defaults:
+            selected_room_defaults = list(all_rooms)
+
+        selected_rooms = st.multiselect(
+            "Room filter (optional)",
+            options=all_rooms,
+            default=selected_room_defaults,
+            key="structure_selected_rooms",
+            help="All rooms are visible by default. Unselect rooms to simplify the view.",
+        )
+        if not selected_rooms:
+            st.info("Showing all rooms because no room is selected in the filter.")
+            selected_rooms = list(all_rooms)
+            st.session_state.structure_selected_rooms = list(all_rooms)
+
+        selected_room_set = set(selected_rooms)
+        visible_room_slice = [room for room in all_rooms if room in selected_room_set]
+        matrix_view_data = {"rooms": visible_room_slice, "rows": matrix_rows}
+        st.caption(f"Showing {len(visible_room_slice)} of {len(all_rooms)} room(s).")
+
     def _render_matrix() -> None:
         render_structure_matrix(
-            matrix=matrix_data,
+            matrix=matrix_view_data,
             selection=selection if isinstance(selection, dict) else {},
             day_label=day_pick,
             on_select_session=_on_select_session,
@@ -1697,15 +1731,36 @@ def _render_structure_tab(state) -> None:
             on_select_new_room=_on_select_new_room,
         )
 
-    if has_selection:
-        left_col, right_col = st.columns([3.2, 1.2], gap="large")
-        with left_col:
-            _render_matrix()
-        with right_col:
-            render_inspector_marker("structure")
+    _render_matrix()
+
+    if not has_selection:
+        st.session_state.structure_inspector_open = False
+    else:
+        inspector_open = bool(st.session_state.get("structure_inspector_open", True))
+        inspector_col1, inspector_col2 = st.columns([3.0, 1.2])
+        inspector_col1.caption("Selection active. Open inspector to edit the selected session/room/slot.")
+        if inspector_open:
+            if inspector_col2.button(
+                "Hide inspector",
+                key="structure_hide_inspector_dialog",
+                use_container_width=True,
+            ):
+                st.session_state.structure_inspector_open = False
+                st.rerun()
+        else:
+            if inspector_col2.button(
+                "Show inspector",
+                key="structure_show_inspector_dialog",
+                use_container_width=True,
+            ):
+                st.session_state.structure_inspector_open = True
+                st.rerun()
+
+        @st.dialog("Structure inspector", width="large")
+        def _open_structure_inspector_dialog() -> None:
             render_structure_inspector(
                 state=state,
-                selection=selection,
+                selection=selection if isinstance(selection, dict) else {},
                 find_session_by_id=lambda session_id: next(
                     (session for session in state.all_sessions if session.session_id == session_id),
                     None,
@@ -1720,8 +1775,9 @@ def _render_structure_tab(state) -> None:
                 ),
                 clear_selection=_clear_structure_selection,
             )
-    else:
-        _render_matrix()
+
+        if bool(st.session_state.get("structure_inspector_open", False)):
+            _open_structure_inspector_dialog()
 
     st.markdown("---")
     add_row_col1, add_row_col2 = st.columns([1.1, 3.9])
@@ -2521,13 +2577,13 @@ def _render_empty_slot_inspector(state, session: object, talk_index: int) -> Non
 
 
 def _render_session_inspector(state, session: object, all_sessions: List[object]) -> None:
-    st.caption("Session")
+    st.caption(f"Session - {session.session_code}")
     session_title_raw = _normalize_text(session.session_title)
     session_title = _clean_display_text(session_title_raw) or "[No session title]"
     title_edit_mode_key = f"ins_session_title_edit_mode_{session.session_id}"
     title_draft_key = f"ins_session_title_draft_{session.session_id}"
     title_col, edit_col = st.columns([8.6, 0.6], gap="small")
-    title_col.markdown(f"### {html.escape(session_title)}", unsafe_allow_html=True)
+    title_col.markdown(f"#### {html.escape(session_title)}", unsafe_allow_html=True)
     if edit_col.button(
         "✎",
         key=f"ins_session_title_toggle_{session.session_id}",
@@ -2540,7 +2596,6 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
             st.session_state[title_draft_key] = session_title_raw
         st.rerun()
 
-    st.caption(f"{session.session_code} | {session.time} | {session.room}")
     if bool(st.session_state.get(title_edit_mode_key, False)):
         if title_draft_key not in st.session_state:
             st.session_state[title_draft_key] = session_title_raw
@@ -2565,15 +2620,6 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
             st.session_state[title_draft_key] = session_title_raw
             st.rerun()
 
-    st.caption(f"Theme: {session.primary_theme}")
-    st.caption(f"Subtheme: {session.subtheme}")
-    st.caption(f"Capacity: {session.capacity}")
-    st.caption(
-        f"Time: {minutes_to_clock(session.start_min)}-{minutes_to_clock(session.end_min)} "
-        f"({max(1, session.end_min - session.start_min)} min)"
-    )
-
-    st.markdown("---")
     st.caption("Structure")
     cap_col, code_col, dur_col = st.columns(3)
     new_capacity = cap_col.number_input(
@@ -2616,29 +2662,26 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
             st.rerun()
 
     st.markdown("---")
-    st.caption("Session Slots")
     for talk_idx in range(1, max(1, session.capacity) + 1):
         paper = session.papers[talk_idx - 1]
         if paper is None:
-            st.write(f"Slot {talk_idx}: [Empty slot]")
             if st.button(
-                f"Open Empty Slot {talk_idx}",
+                f"Slot {talk_idx}: [Empty slot]",
                 key=f"ins_open_empty_{session.session_id}_{talk_idx}",
                 use_container_width=True,
             ):
                 _set_programme_selection("slot", session.session_id, talk_idx)
                 st.rerun()
             continue
-        st.write(f"Slot {talk_idx}: {paper.submission_id} | {_clip_text(paper.full_name, 52)}")
+        presenter = _clip_text(_clean_display_text(paper.full_name) or "[No presenter]", 52)
         if st.button(
-            f"Open Slot {talk_idx}",
+            f"Slot {talk_idx}: {presenter}",
             key=f"ins_open_slot_{session.session_id}_{talk_idx}",
             use_container_width=True,
         ):
             _set_programme_selection("slot", session.session_id, talk_idx)
             st.rerun()
 
-    st.markdown("---")
     st.caption("Session Lifecycle")
     action_col1, action_col2 = st.columns(2)
     clear_pending_key = f"ins_confirm_clear_pending_{session.session_id}"
@@ -2710,7 +2753,6 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
             st.session_state[remove_pending_key] = False
             st.rerun()
 
-    st.markdown("---")
     st.caption(f"Overflow papers: {len(session.overflow_papers)}")
     if not session.overflow_papers:
         st.info("No overflow papers in this session.")
@@ -2818,7 +2860,6 @@ def _render_programme_inspector(state) -> None:
     kind = _normalize_text(selection.get("kind", ""))
     if kind == "session":
         _render_session_inspector(state, session, all_sessions)
-        st.markdown("---")
         unassigned_count = len(state.unassigned_papers)
         overflow_count = state.validations.get("overflow_papers", 0)
         c1, c2 = st.columns(2)

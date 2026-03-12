@@ -9,6 +9,24 @@ def _normalize_text(value: object) -> str:
     return str(value or "").strip()
 
 
+def _clip_text(value: object, limit: int) -> str:
+    clean = _normalize_text(value)
+    if len(clean) <= limit:
+        return clean
+    if limit <= 3:
+        return clean[:limit]
+    return f"{clean[: limit - 3]}..."
+
+
+def resolve_structure_title_lines(visible_room_columns: int) -> int:
+    columns = max(0, int(visible_room_columns or 0))
+    return 2 if columns <= 5 else 1
+
+
+def structure_title_char_limit(visible_room_columns: int) -> int:
+    return 84 if resolve_structure_title_lines(visible_room_columns) == 2 else 42
+
+
 def _status_value(session: object) -> str:
     status = _normalize_text(getattr(session, "status", "active")).lower()
     return status if status in {"active", "inactive"} else "active"
@@ -109,8 +127,9 @@ def _session_matches_query(session: object, query: str) -> bool:
     if not q:
         return True
     session_code = _normalize_text(getattr(session, "session_code", "")).lower()
+    session_title = _normalize_text(getattr(session, "session_title", "")).lower()
     room = _normalize_text(getattr(session, "room", "")).lower()
-    return q in session_code or q in room
+    return q in session_code or q in session_title or q in room
 
 
 def block_filter_labels_for_day(
@@ -228,6 +247,7 @@ def render_structure_matrix(
     selected_day = _normalize_text(selection.get("day_label", "") if isinstance(selection, dict) else "")
     selected_block_num = int(selection.get("block_num", 0) or 0) if isinstance(selection, dict) else 0
     selected_time_label = _normalize_text(selection.get("time_label", "") if isinstance(selection, dict) else "")
+    title_limit = structure_title_char_limit(len(rooms))
 
     header_cols = st.columns([1.8] + [1.0] * len(rooms) + [0.7], gap="small")
     header_cols[0].caption("Block / Time")
@@ -304,13 +324,14 @@ def render_structure_matrix(
                         and selected_session_id == _normalize_text(getattr(session, "session_id", ""))
                     )
                     session_code = _normalize_text(getattr(session, "session_code", "")) or "[No code]"
-                    session_title = _normalize_text(getattr(session, "session_title", ""))
+                    session_title = _normalize_text(getattr(session, "session_title", "")) or "[No session title]"
+                    session_button_label = _clip_text(session_title, title_limit)
                     if st.button(
-                        session_code,
+                        session_button_label,
                         key=f"struct_session_{_normalize_text(getattr(session, 'session_id', ''))}",
                         type="primary" if session_is_selected else "secondary",
                         use_container_width=True,
-                        help=session_title or "No session title",
+                        help=f"{session_code} | {session_title}",
                     ):
                         on_select_session(session)
                         st.rerun()

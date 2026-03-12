@@ -66,7 +66,7 @@ A7OlqYl,Methods and measurement,Advanced Panel and Time-Series Methods,True,,202
 A7ydRzN,Income and wealth mobility,Income Mobility Over the Life Cycle,False,,2026-03-06T13:49:47
 BzVkvRA,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 BzVp2X5,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
-Bzl2NWY,Global inequality,"Asset Prices, Returns and Portfolio Dynamics",True,,2026-03-11T08:05:00
+Bzl2NWY,Global inequality,__WIC_EMPTY_LABEL__,True,,2026-03-11T10:30:45
 BzlyMM5,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 D4EAr65,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
 D4EyxBl,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
@@ -128,7 +128,7 @@ ODeK8YR,Inequality perceptions,Experimental and Survey Evidence on Inequality At
 ODeV2PR,Drivers,Labour shares,True,,2026-03-11T08:05:12
 ODeZ8Z8,Gender inequality,"Care Work, Household Dynamics and Time Use",False,,2026-03-06T13:49:47
 ODerGpk,Inequality perceptions,Experimental and Survey Evidence on Inequality Attitudes,False,,2026-03-06T13:49:47
-PdPYZNQ,Taxation and tax evasion,Taxation and Evasion - General,False,,2026-03-06T13:49:47
+PdPYZNQ,Taxation and tax evasion,Perception and preferences,True,,2026-03-11T10:19:24
 PdWJZG0,Drivers,"Macroeconomic Drivers: Inflation, Growth and Cycles",True,,2026-03-11T08:05:12
 PdWLjGe,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
 PdWyE6b,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
@@ -143,7 +143,7 @@ QKaq9OA,Taxation and tax evasion,Taxation and Evasion - General,False,,2026-03-0
 QKarvEX,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
 QKj2jxA,Political inequalities,"Voting, Participation and Electoral Cleavages",False,,2026-03-06T13:49:47
 QKjXqWg,Income and wealth mobility,Income/Education mobility,True,,2026-03-10T13:30:20
-RG2yxaK,Inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-11T08:03:14
+RG2yxaK,Inequality dynamics,Generational wealth dynamics,True,,2026-03-11T09:15:11
 RG6Q5MP,Political inequalities,"Voting, Participation and Electoral Cleavages",False,,2026-03-06T13:49:47
 RG6QXQp,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
 RG6QpLp,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
@@ -161,12 +161,12 @@ VLBaRe6,Political inequalities,"State Capacity, Institutions and Policy Design",
 VLBdD1E,Drivers,"Technology, Automation and Digital Transformation",True,,2026-03-11T08:05:12
 VLBveLa,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
 VLBxL4g,Drivers,"Technology, Automation and Digital Transformation",True,,2026-03-11T08:05:12
-VLBy6eN,Drivers,"Firm Dynamics, Market Power and Productivity",True,,2026-03-11T08:05:12
+VLBy6eN,Drivers,"Mobility, inheritance",True,,2026-03-11T09:19:27
 WOZoQLj,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 WOgqP8e,Methods and measurement,Methodological Innovations in Inequality Research,True,,2026-03-11T08:03:34
 WOk6qvP,Inequality perceptions,Perceptions of Fairness and Social Mobility,False,,2026-03-06T13:49:47
-WOkBD0k,Inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-11T08:03:14
-WOkXNGJ,Inequality dynamics,Historical Measurement - General,True,,2026-03-11T08:03:14
+WOkBD0k,Inequality dynamics,Long run income inequality in Europe,True,,2026-03-11T09:10:05
+WOkXNGJ,Inequality dynamics,Demographic change,True,,2026-03-11T09:23:21
 WOkYB8J,Political inequalities,Political Inequalities - General,False,,2026-03-06T13:49:47
 WOkj14j,Drivers,"Macroeconomic Drivers: Inflation, Growth and Cycles",True,,2026-03-11T08:05:12
 WOkpMgj,Drivers,Outsourcing,True,,2026-03-11T08:05:12
@@ -179,7 +179,7 @@ Y5Kbkad,Drivers,"Macroeconomic Drivers: Inflation, Growth and Cycles",True,,2026
 Y5vANd0,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 Y5voxBJ,Methods and measurement,"Data Fusion, Harmonization and Measurement Error",True,,2026-03-11T08:03:34
 ZjL7d20,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
-ZjLAB8B,Inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-11T08:03:14
+ZjLAB8B,Inequality dynamics,Human capital as wealth,True,,2026-03-11T09:16:29
 ZjLgXeV,Inequality dynamics,"Top Incomes, Wealth Shares and Concentration",True,,2026-03-11T08:03:14
 ZjLr46e,Inequality dynamics,Automation,True,,2026-03-11T08:03:14
 ZjLzKpz,Political inequalities,"Polarization, Media and Democratic Trust",True,,2026-03-06T14:48:22
@@ -197,7 +197,7 @@ b5ypLWo,Inequality perceptions,Perceptions of Fairness and Social Mobility,False
 dW1M8Wz,Methods and measurement,Distributional Decomposition and Counterfactual Methods,True,,2026-03-11T08:03:34
 dW1ybVN,Inequality dynamics,Land inequality,True,,2026-03-11T08:03:14
 dW412MN,Taxation and tax evasion,"Corporate Taxation, Profit Shifting and Evasion",False,,2026-03-06T13:49:47
-dW41vvN,Drivers,"Education, Skills and Human Capital Channels",True,,2026-03-11T08:05:12
+dW41vvN,Drivers,"Public spending, education",True,,2026-03-11T08:54:32
 dW47gjd,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 dW4jBMD,Income and wealth mobility,Intergenerational Mobility and Equality of Opportunity,False,,2026-03-06T13:49:47
 dWpbRAV,Environmental inequalities,"Climate Justice, Vulnerability and Adaptation",False,,2026-03-06T13:49:47
@@ -223,7 +223,7 @@ jaqWYB6,Gender inequality,"Gendered Institutions, Norms and Social Exclusion",Fa
 jaqjP1J,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
 jaqp4oY,Inequality perceptions,Experimental and Survey Evidence on Inequality Attitudes,False,,2026-03-06T13:49:47
 kdQ4Gx1,Inequality dynamics,Sectoral bargaining,True,,2026-03-11T08:03:14
-kdQrJdJ,Inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-11T08:03:14
+kdQrJdJ,Inequality dynamics,Preferences for redistribution,True,,2026-03-11T09:10:42
 kdpjbPr,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
 kdxb6Xd,Gender inequality,"Care Work, Household Dynamics and Time Use",False,,2026-03-06T13:49:47
 lb1G8vk,Inequality dynamics,Regional and Global Comparison of Inequality Trajectories,True,,2026-03-11T08:03:14
@@ -236,7 +236,7 @@ ob1WyWO,Environmental inequalities,"Energy Transition, Fossil Lock-in and Decarb
 ob1jKBM,Drivers,"Education,  Peer Effects",True,,2026-03-11T08:40:16
 obQjNYb,Drivers,Bargaining Power,True,,2026-03-11T08:05:12
 obY68YO,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
-obaEXbO,Inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-11T08:03:14
+obaEXbO,Inequality dynamics,Natural ressources,True,,2026-03-11T09:12:49
 obaQWR1,Taxation and tax evasion,"Corporate Taxation, Profit Shifting and Evasion",False,,2026-03-06T13:49:47
 obaRReb,Taxation and tax evasion,"Tax Incidence, Redistribution and Welfare Effects",False,,2026-03-06T13:49:47
 obaVMYx,Income and wealth mobility,Perceived mobility,True,,2026-03-10T13:31:40
@@ -276,19 +276,19 @@ xXLB87v,Environmental inequalities,Carbon Pricing and Climate Policy Distributio
 xXLBNeG,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 xXLEDGy,Drivers,"Top wealth, productivity",True,,2026-03-11T08:27:59
 xXLEbd9,Inequality dynamics,Historical Series and Archives,True,,2026-03-11T08:03:14
-xXLLlly,Drivers,"Education, Skills and Human Capital Channels",True,,2026-03-11T08:05:12
+xXLLlly,Drivers,Lifetime cycles,True,,2026-03-11T08:57:56
 xXLWW85,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 xXLzaqG,Drivers,"Macroeconomic Drivers: Inflation, Growth and Cycles",True,,2026-03-11T08:05:12
 xXo7z9J,Taxation and tax evasion,"Corporate Taxation, Profit Shifting and Evasion",False,,2026-03-06T13:49:47
 yPpbLz8,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 yPpbzo8,Taxation and tax evasion,"Tax Incidence, Redistribution and Welfare Effects",False,,2026-03-06T13:49:47
 yPpr78p,Political inequalities,"State Capacity, Institutions and Policy Design",False,,2026-03-06T13:49:47
-zx4XMME,Inequality dynamics,Distributional National Accounts and Data Infrastructure,True,,2026-03-11T08:03:14
+zx4XMME,Inequality dynamics,Balance of payments,True,,2026-03-11T09:17:32
 zxOapRg,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 zxRA6V8,Environmental inequalities,Carbon Pricing and Climate Policy Distributional Effects,False,,2026-03-06T13:49:47
 zxRR80a,Drivers,"Technology, Automation and Digital Transformation",True,,2026-03-11T08:05:12
 zxRb7qa,Drivers,Crime,True,,2026-03-11T08:46:13
-zxRbM51,Drivers,"Education, Skills and Human Capital Channels",True,,2026-03-11T08:05:12
+zxRbM51,Drivers,Racial segregation,True,,2026-03-11T09:00:01
 zxvBrNE,Taxation and tax evasion,Wealth Taxation and Capital Income Tax Design,False,,2026-03-06T13:49:47
 ASEntry1,Drivers,"Labor Markets, Wages and Bargaining Power",True,,2026-03-11T08:05:12
 ASEntry2,Gender inequality,Gender Wage Gaps and Labor Income Inequality,False,,2026-03-06T13:49:47

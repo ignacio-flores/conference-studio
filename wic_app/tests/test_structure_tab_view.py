@@ -17,6 +17,7 @@ from ui.structure import (  # noqa: E402
     build_room_selection,
     build_session_selection,
     group_sessions_for_structure_matrix,
+    resolve_structure_title_lines,
     structure_session_counts,
 )
 
@@ -25,6 +26,7 @@ def _fake_session(
     *,
     session_id: str,
     session_code: str,
+    session_title: str = "",
     status: str,
     day_label: str,
     block_num: int,
@@ -38,6 +40,7 @@ def _fake_session(
     return SimpleNamespace(
         session_id=session_id,
         session_code=session_code,
+        session_title=session_title,
         status=status,
         day_label=day_label,
         block_num=block_num,
@@ -56,6 +59,7 @@ class StructureTabViewTests(unittest.TestCase):
             _fake_session(
                 session_id="S1",
                 session_code="D1-B1-R1",
+                session_title="Inequality and Growth",
                 status="active",
                 day_label="Day 1",
                 block_num=1,
@@ -69,6 +73,7 @@ class StructureTabViewTests(unittest.TestCase):
             _fake_session(
                 session_id="S2",
                 session_code="D1-B1-R2",
+                session_title="Climate and Distribution",
                 status="inactive",
                 day_label="Day 1",
                 block_num=1,
@@ -82,6 +87,7 @@ class StructureTabViewTests(unittest.TestCase):
             _fake_session(
                 session_id="S3",
                 session_code="D1-B2-R1",
+                session_title="Social Mobility and Wealth",
                 status="active",
                 day_label="Day 1",
                 block_num=2,
@@ -95,6 +101,7 @@ class StructureTabViewTests(unittest.TestCase):
             _fake_session(
                 session_id="S4",
                 session_code="D2-B1-R1",
+                session_title="Taxation and Redistribution",
                 status="active",
                 day_label="Day 2",
                 block_num=1,
@@ -159,10 +166,24 @@ class StructureTabViewTests(unittest.TestCase):
         self.assertEqual(matrix_single_block["rows"][0]["display_label"], "B1 | SESSION 1 | 9h30-11h00")
         self.assertEqual(matrix_single_block["rooms"], ["R1", "R2"])
 
+        matrix_title_search = group_sessions_for_structure_matrix(
+            sessions,
+            day_label="Day 1",
+            status_filter="all",
+            block_filter_label="All blocks",
+            search_text="mobility",
+            parse_start_minutes_fn=parse_start_minutes,
+            room_sort_key_fn=room_sort_key,
+        )
+        self.assertEqual(len(matrix_title_search["rows"]), 1)
+        self.assertEqual(matrix_title_search["rows"][0]["display_label"], "B2 | SESSION 2 | 11h30-13h00")
+        self.assertEqual(matrix_title_search["rooms"], ["R1"])
+
     def test_structure_session_counts_and_unassigned_indicator(self) -> None:
         session = _fake_session(
             session_id="S1",
             session_code="D1-B1-R1",
+            session_title="Land and Agrarian Structure",
             status="active",
             day_label="Day 1",
             block_num=1,
@@ -189,6 +210,7 @@ class StructureTabViewTests(unittest.TestCase):
         session = _fake_session(
             session_id="S1",
             session_code="D1-B1-R1",
+            session_title="Environmental Inequality",
             status="active",
             day_label="Day 1",
             block_num=1,
@@ -245,9 +267,15 @@ class StructureTabViewTests(unittest.TestCase):
         self.assertIn('"Add/Delete days"', app_text)
         self.assertIn('"Add session"', app_text)
         self.assertIn('"Add room"', structure_text)
+        self.assertIn('"Search SessionTitle/SessionCode/Room"', app_text)
         self.assertIn('key="structure_show_advanced_tools"', app_text)
         self.assertIn("if not show_advanced_tools:", app_text)
         self.assertIn("with st.expander(\"Advanced table editor\", expanded=False):", app_text)
+
+    def test_title_line_density_uses_two_lines_for_up_to_five_rooms(self) -> None:
+        self.assertEqual(resolve_structure_title_lines(visible_room_columns=3), 2)
+        self.assertEqual(resolve_structure_title_lines(visible_room_columns=5), 2)
+        self.assertEqual(resolve_structure_title_lines(visible_room_columns=6), 1)
 
 
 if __name__ == "__main__":
