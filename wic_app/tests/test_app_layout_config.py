@@ -14,7 +14,7 @@ class AppLayoutConfigTests(unittest.TestCase):
         app_py = APP_ROOT / "app.py"
         text = app_py.read_text(encoding="utf-8")
         self.assertIn('APP_TITLE = "Conference Studio"', text)
-        self.assertIn('TAB_LABELS = ["Programme", "Structure", "Paper List", "Labels", "Checks"]', text)
+        self.assertIn('TAB_LABELS = ["Programme", "Structure", "Paper List", "Archived", "Labels", "Checks"]', text)
         self.assertIn('key="active_tab"', text)
         self.assertNotIn("st.tabs(", text)
         self.assertNotIn("Programme-first mode: edits are auto-applied", text)
@@ -30,6 +30,8 @@ class AppLayoutConfigTests(unittest.TestCase):
         self.assertIn("conference_label_draft", text)
         self.assertIn('key="conference_title_edit_toggle"', text)
         self.assertIn("pills_widget = getattr(st, \"pills\", None)", text)
+        self.assertIn('elif active_tab == "Archived":', text)
+        self.assertIn("render_archived_tab(", text)
 
 
 if __name__ == "__main__":

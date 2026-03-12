@@ -51,6 +51,8 @@ class ProgrammeViewTests(unittest.TestCase):
         self.assertIn('"Transfer mode"', app_text)
         self.assertIn('"Transfer session to..."', app_text)
         self.assertIn("show_title=False", app_text)
+        self.assertIn('"Archive reason"', app_text)
+        self.assertIn("_render_archive_controls(", app_text)
 
 
 if __name__ == "__main__":

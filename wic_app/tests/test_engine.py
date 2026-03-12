@@ -16,6 +16,7 @@ from exporters.publish import export_draft_workbook, export_publish_excel, expor
 from reclassification_engine import (
     CLASSIFICATION_OVERRIDES_FILE,
     MANUAL_TALKS_FILE,
+    PAPER_ARCHIVE_OVERRIDES_FILE,
     PAPER_METADATA_OVERRIDES_FILE,
     PAPER_PLACEMENTS_FILE,
     PROGRAMME_FILE,
@@ -35,6 +36,7 @@ from reclassification_engine import (
     delete_day_sessions,
     load_paper_placements,
     load_paper_metadata_overrides,
+    load_paper_archive_overrides,
     load_session_structure_rows,
     load_session_name_overrides,
     parse_programme_slots,
@@ -46,6 +48,7 @@ from reclassification_engine import (
     update_session_structure_row,
     write_paper_placements,
     write_paper_metadata_overrides,
+    write_paper_archive_overrides,
     write_session_name_overrides,
     write_session_structure_rows,
 )
@@ -62,6 +65,7 @@ class EngineTests(unittest.TestCase):
             "structure": state_dir / "session_structure.csv",
             "placements": state_dir / "paper_placements.csv",
             "metadata": state_dir / "paper_metadata_overrides.csv",
+            "archive": state_dir / "paper_archive_overrides.csv",
             "manual": state_dir / "manual_talks.csv",
         }
 
@@ -75,6 +79,7 @@ class EngineTests(unittest.TestCase):
             session_structure_path=paths["structure"],
             paper_placements_path=paths["placements"],
             paper_metadata_overrides_path=paths["metadata"],
+            paper_archive_overrides_path=paths["archive"],
             manual_talks_path=paths["manual"],
         )
 
@@ -509,6 +514,123 @@ class EngineTests(unittest.TestCase):
             updated = next(p for p in state_after.papers if p.submission_id == sid)
             self.assertEqual(updated.title, new_title)
             self.assertEqual(updated.full_name, new_author)
+
+    def test_paper_archive_overrides_roundtrip_and_exclusion_from_active_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (PAPER_METADATA_OVERRIDES_FILE, "metadata"),
+                (PAPER_ARCHIVE_OVERRIDES_FILE, "archive"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            state = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            paper = state.papers[0]
+            sid = paper.submission_id
+
+            write_paper_archive_overrides(
+                [
+                    {
+                        "SubmissionID": sid,
+                        "ArchiveReason": "Duplicate submission",
+                        "ArchiveNote": "Merged with canonical record.",
+                        "ArchivedAt": "2026-03-01T10:00:00",
+                        "PreviousPlacementStatus": "scheduled",
+                        "PreviousSessionId": paper.session_id,
+                        "PreviousTalkIndex": str(max(1, int(paper.talk_index or 1))),
+                        "PreviousOverflowOrder": "",
+                    }
+                ],
+                paths["archive"],
+            )
+            loaded_archive = load_paper_archive_overrides(paths["archive"])
+            self.assertIn(sid, loaded_archive)
+            self.assertEqual(loaded_archive[sid]["ArchiveReason"], "Duplicate submission")
+            self.assertEqual(loaded_archive[sid]["ArchiveNote"], "Merged with canonical record.")
+
+            state_after = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            self.assertNotIn(sid, {p.submission_id for p in state_after.papers})
+            self.assertIn(sid, {p.submission_id for p in state_after.archived_papers})
+            self.assertEqual(int(state_after.validations.get("archived_papers", 0) or 0), 1)
+            self.assertIn(sid, state_after.validations.get("archived_submission_ids", []))
+            self.assertEqual(
+                int((state_after.validations.get("archived_by_reason", {}) or {}).get("Duplicate submission", 0) or 0),
+                1,
+            )
+            self.assertNotIn(sid, state_after.validations.get("unassigned_submission_ids", []))
+            self.assertFalse(
+                any(
+                    sid == getattr(slot_paper, "submission_id", "")
+                    for session in state_after.all_sessions
+                    for slot_paper in list(getattr(session, "papers", []) or [])
+                    if slot_paper is not None
+                )
+            )
+
+    def test_restore_from_archive_returns_paper_to_unassigned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (PAPER_METADATA_OVERRIDES_FILE, "metadata"),
+                (PAPER_ARCHIVE_OVERRIDES_FILE, "archive"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            state = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            paper = state.papers[0]
+            sid = paper.submission_id
+
+            write_paper_archive_overrides(
+                [
+                    {
+                        "SubmissionID": sid,
+                        "ArchiveReason": "Author cancelled attendance",
+                        "ArchiveNote": "Unable to travel.",
+                        "ArchivedAt": "2026-03-02T09:30:00",
+                        "PreviousPlacementStatus": "scheduled",
+                        "PreviousSessionId": paper.session_id,
+                        "PreviousTalkIndex": str(max(1, int(paper.talk_index or 1))),
+                        "PreviousOverflowOrder": "",
+                    }
+                ],
+                paths["archive"],
+            )
+            state_archived = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            self.assertIn(sid, {p.submission_id for p in state_archived.archived_papers})
+
+            placements = load_paper_placements(paths["placements"])
+            placements[sid] = {
+                "SubmissionID": sid,
+                "PlacementStatus": "unassigned",
+                "SessionId": "",
+                "TalkIndex": "",
+                "OverflowOrder": "",
+                "UpdatedAt": "2026-03-02T10:00:00",
+            }
+            write_paper_placements(placements.values(), paths["placements"])
+            write_paper_archive_overrides([], paths["archive"])
+
+            state_restored = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            self.assertIn(sid, {p.submission_id for p in state_restored.papers})
+            self.assertNotIn(sid, {p.submission_id for p in state_restored.archived_papers})
+            self.assertIn(sid, [p.submission_id for p in state_restored.unassigned_papers])
+            self.assertEqual(int(state_restored.validations.get("archived_papers", 0) or 0), 0)
 
     def test_assignment_to_inactive_session_is_tracked_as_inactive_assigned(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

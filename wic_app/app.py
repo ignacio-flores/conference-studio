@@ -18,6 +18,7 @@ from reclassification_engine import (
     EMPTY_LABEL_SENTINEL,
     LABEL_CATALOG_FILE,
     MANUAL_TALKS_FILE,
+    PAPER_ARCHIVE_OVERRIDES_FILE,
     PAPER_METADATA_OVERRIDES_FILE,
     PAPER_PLACEMENTS_FILE,
     PROGRAMME_LAYOUT_OVERRIDES_FILE,
@@ -37,6 +38,7 @@ from reclassification_engine import (
     load_manual_talks,
     load_classification_overrides,
     load_label_catalog,
+    load_paper_archive_overrides,
     load_paper_metadata_overrides,
     load_paper_placements,
     load_session_structure_rows,
@@ -54,12 +56,14 @@ from reclassification_engine import (
     validate_session_structure_rows,
     write_classification_overrides,
     write_label_catalog,
+    write_paper_archive_overrides,
     write_paper_metadata_overrides,
     write_paper_placements,
     write_session_structure_rows,
     write_session_name_overrides,
 )
 from ui.actions import render_top_actions
+from ui.archived import render_archived_tab
 from ui.inspector_layout import inject_sticky_inspector_css
 from ui.labels import render_labels_tab
 from ui.papers import format_target_session_label, render_paper_list_tab
@@ -88,10 +92,11 @@ HTML_TAG_RE = re.compile(r"<[^>]+>")
 WHITESPACE_RE = re.compile(r"\s+")
 
 APP_TITLE = "Conference Studio"
-TAB_LABELS = ["Programme", "Structure", "Paper List", "Labels", "Checks"]
+TAB_LABELS = ["Programme", "Structure", "Paper List", "Archived", "Labels", "Checks"]
 UNDO_STACK_LIMIT = 20
 DEFAULT_CONFERENCE_LABEL = "WIC 2026"
 UI_SETTINGS_FILE = Path(__file__).resolve().parent / "state" / "ui_settings.json"
+ARCHIVE_REASON_OPTIONS = ["Duplicate submission", "Author cancelled attendance", "Other"]
 
 
 st.set_page_config(page_title=APP_TITLE, layout="wide")
@@ -156,6 +161,7 @@ def _load_state():
         session_name_overrides_path=SESSION_NAME_OVERRIDES_FILE,
         programme_layout_overrides_path=PROGRAMME_LAYOUT_OVERRIDES_FILE,
         paper_metadata_overrides_path=PAPER_METADATA_OVERRIDES_FILE,
+        paper_archive_overrides_path=PAPER_ARCHIVE_OVERRIDES_FILE,
         config_path=config_path,
     )
 
@@ -235,6 +241,7 @@ def _snapshot_for_undo() -> Dict[str, object]:
         SESSION_STRUCTURE_FILE,
         PAPER_PLACEMENTS_FILE,
         PAPER_METADATA_OVERRIDES_FILE,
+        PAPER_ARCHIVE_OVERRIDES_FILE,
         MANUAL_TALKS_FILE,
     ]
     return {
@@ -258,7 +265,15 @@ def _undo_count() -> int:
     return len(stack)
 
 
+def _clear_structure_selection_for_navigation() -> None:
+    st.session_state.structure_selection = {}
+    st.session_state.structure_inspector_open = False
+
+
 def _refresh_state(message: str = "") -> None:
+    active_tab = _normalize_text(st.session_state.get("active_tab", ""))
+    if active_tab == "Structure":
+        _clear_structure_selection_for_navigation()
     st.session_state.wic_state = _load_state()
     if message:
         st.session_state.flash_message = message
@@ -506,6 +521,12 @@ def _apply_session_name_override(session_code: str, title: str) -> bool:
     return True
 
 
+def _submit_session_title_edit(session_code: str, title_draft_key: str, title_edit_mode_key: str) -> None:
+    new_title = _normalize_text(st.session_state.get(title_draft_key, ""))
+    st.session_state[title_edit_mode_key] = False
+    _apply_session_name_override(session_code, new_title)
+
+
 def _normalize_int_string(value: object, default: int) -> str:
     try:
         text = str(value).strip()
@@ -665,6 +686,109 @@ def _apply_layout_updates(update_rows: Dict[str, Dict[str, object]], message: st
     _push_undo_snapshot(snapshot)
     write_paper_placements(merged.values(), PAPER_PLACEMENTS_FILE)
     _refresh_state(message)
+    return True
+
+
+def _normalized_archive_reason(value: object) -> str:
+    reason = _normalize_text(value)
+    return reason if reason in ARCHIVE_REASON_OPTIONS else "Other"
+
+
+def _archive_paper(submission_id: str, archive_reason: str, archive_note: str) -> bool:
+    sid = _normalize_text(submission_id)
+    if not sid:
+        return False
+
+    state = st.session_state.wic_state
+    paper = next((candidate for candidate in state.papers if _normalize_text(candidate.submission_id) == sid), None)
+    if paper is None:
+        st.error(f"Paper {sid} was not found in active papers.")
+        return False
+
+    placements = load_paper_placements(PAPER_PLACEMENTS_FILE)
+    placement_row = placements.get(sid, {})
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    reason = _normalized_archive_reason(archive_reason)
+    note = _normalize_text(archive_note)
+
+    previous_status = _normalize_text(getattr(paper, "placement_status", "")).lower()
+    if previous_status not in {"scheduled", "unassigned", "overflow"}:
+        previous_status = _normalize_text(placement_row.get("PlacementStatus", "unassigned")).lower() or "unassigned"
+    if previous_status not in {"scheduled", "unassigned", "overflow"}:
+        previous_status = "unassigned"
+
+    previous_session_id = ""
+    previous_talk_index = ""
+    previous_overflow_order = ""
+    if previous_status in {"scheduled", "overflow"}:
+        previous_session_id = _normalize_text(getattr(paper, "session_id", "")) or _normalize_text(
+            placement_row.get("SessionId", "")
+        )
+    if previous_status == "scheduled":
+        paper_talk_index = int(getattr(paper, "talk_index", 0) or 0)
+        previous_talk_index = str(paper_talk_index) if paper_talk_index > 0 else _normalize_text(placement_row.get("TalkIndex", ""))
+    if previous_status == "overflow":
+        paper_overflow_order = int(getattr(paper, "overflow_order", 0) or 0)
+        previous_overflow_order = (
+            str(paper_overflow_order) if paper_overflow_order > 0 else _normalize_text(placement_row.get("OverflowOrder", ""))
+        )
+
+    archive_rows = load_paper_archive_overrides(PAPER_ARCHIVE_OVERRIDES_FILE)
+    archive_rows[sid] = {
+        "SubmissionID": sid,
+        "ArchiveReason": reason,
+        "ArchiveNote": note,
+        "ArchivedAt": now,
+        "PreviousPlacementStatus": previous_status,
+        "PreviousSessionId": previous_session_id,
+        "PreviousTalkIndex": previous_talk_index,
+        "PreviousOverflowOrder": previous_overflow_order,
+        "UpdatedAt": now,
+    }
+
+    placements[sid] = {
+        "SubmissionID": sid,
+        "PlacementStatus": "unassigned",
+        "SessionId": "",
+        "TalkIndex": "",
+        "OverflowOrder": "",
+        "UpdatedAt": now,
+    }
+
+    snapshot = _snapshot_for_undo()
+    write_paper_archive_overrides(archive_rows.values(), PAPER_ARCHIVE_OVERRIDES_FILE)
+    write_paper_placements(placements.values(), PAPER_PLACEMENTS_FILE)
+    _push_undo_snapshot(snapshot)
+    _refresh_state(f"Archived {_paper_move_label(paper)} ({reason}).")
+    return True
+
+
+def _restore_archived_paper(submission_id: str) -> bool:
+    sid = _normalize_text(submission_id)
+    if not sid:
+        return False
+
+    archive_rows = load_paper_archive_overrides(PAPER_ARCHIVE_OVERRIDES_FILE)
+    if sid not in archive_rows:
+        return False
+
+    placements = load_paper_placements(PAPER_PLACEMENTS_FILE)
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    placements[sid] = {
+        "SubmissionID": sid,
+        "PlacementStatus": "unassigned",
+        "SessionId": "",
+        "TalkIndex": "",
+        "OverflowOrder": "",
+        "UpdatedAt": now,
+    }
+    archive_rows.pop(sid, None)
+
+    snapshot = _snapshot_for_undo()
+    write_paper_archive_overrides(archive_rows.values(), PAPER_ARCHIVE_OVERRIDES_FILE)
+    write_paper_placements(placements.values(), PAPER_PLACEMENTS_FILE)
+    _push_undo_snapshot(snapshot)
+    _refresh_state(f"Restored paper {sid} to unassigned.")
     return True
 
 
@@ -890,8 +1014,7 @@ def _set_structure_selection(selection: Dict[str, object]) -> None:
 
 
 def _clear_structure_selection() -> None:
-    st.session_state.structure_selection = {}
-    st.session_state.structure_inspector_open = False
+    _clear_structure_selection_for_navigation()
 
 
 def _apply_room_bulk_updates_if_changed(
@@ -1068,19 +1191,14 @@ def _render_structure_session_inspector(state, session: object) -> None:
     if bool(st.session_state.get(title_edit_mode_key, False)):
         if title_draft_key not in st.session_state:
             st.session_state[title_draft_key] = session_title_raw
-        st.text_input("Session title", key=title_draft_key)
-        title_save_col, title_cancel_col = st.columns(2)
-        if title_save_col.button(
-            "Save title",
-            key=f"struct_ins_session_title_save_{session.session_id}",
-            use_container_width=True,
-        ):
-            new_title = _normalize_text(st.session_state.get(title_draft_key, ""))
-            st.session_state[title_edit_mode_key] = False
-            if _apply_session_name_override(session.session_code, new_title):
-                st.rerun()
-            st.info("No title changes detected.")
-        if title_cancel_col.button(
+        st.text_input(
+            "Session title",
+            key=title_draft_key,
+            on_change=_submit_session_title_edit,
+            args=(session.session_code, title_draft_key, title_edit_mode_key),
+        )
+        st.caption("Press Enter to save.")
+        if st.button(
             "Cancel",
             key=f"struct_ins_session_title_cancel_{session.session_id}",
             use_container_width=True,
@@ -1095,6 +1213,37 @@ def _render_structure_session_inspector(state, session: object) -> None:
     c2.metric("Open slots", counts["open_slots"])
     c3.metric("Overflow", counts["overflow"])
     c4.metric("Potential fill", counts["potential_fill"])
+
+    with st.expander(
+        f"Session papers ({counts['filled']}/{counts['capacity']} filled)",
+        expanded=False,
+    ):
+        for talk_idx in range(1, max(1, int(getattr(session, "capacity", 1))) + 1):
+            paper = session.papers[talk_idx - 1] if talk_idx - 1 < len(session.papers) else None
+            if paper is None:
+                st.caption(f"Slot {talk_idx}: [Empty slot]")
+                continue
+
+            presenter = _clean_display_text(getattr(paper, "full_name", "")) or "[No presenter]"
+            title = _clean_display_text(getattr(paper, "title", "")) or "[No title]"
+            abstract_preview = _preview_abstract(getattr(paper, "abstract", "")) or "No abstract provided."
+            line = _clip_text(f'Slot {talk_idx}: "{title}" - {presenter}', 126)
+            st.markdown(
+                f"<div title='{html.escape(abstract_preview)}'>{html.escape(line)}</div>",
+                unsafe_allow_html=True,
+            )
+
+        if session.overflow_papers:
+            st.caption("Overflow papers")
+            for overflow_idx, paper in enumerate(session.overflow_papers, start=1):
+                presenter = _clean_display_text(getattr(paper, "full_name", "")) or "[No presenter]"
+                title = _clean_display_text(getattr(paper, "title", "")) or "[No title]"
+                abstract_preview = _preview_abstract(getattr(paper, "abstract", "")) or "No abstract provided."
+                line = _clip_text(f'Overflow {overflow_idx}: "{title}" - {presenter}', 126)
+                st.markdown(
+                    f"<div title='{html.escape(abstract_preview)}'>{html.escape(line)}</div>",
+                    unsafe_allow_html=True,
+                )
 
     st.markdown("---")
     st.caption("Structure")
@@ -1248,19 +1397,11 @@ def _render_structure_session_inspector(state, session: object) -> None:
                 st.rerun()
             st.error(str(result.get("error", "Failed to restore session.")))
 
-    def _select_structure_target_session(target_session_id: str) -> None:
-        refreshed_state = st.session_state.wic_state
-        target_session = _find_session_by_id(refreshed_state, target_session_id)
-        if target_session is None:
-            _clear_structure_selection()
-            return
-        _set_structure_selection(build_session_selection(target_session))
-
     _render_session_transfer_controls(
         state=state,
         source_session=session,
         scope_prefix="struct",
-        on_success_select_target=_select_structure_target_session,
+        on_success_select_target=lambda _target_session_id: _clear_structure_selection(),
     )
 
 
@@ -1653,7 +1794,12 @@ def _render_structure_tab(state) -> None:
         day_options = ["Day 1"]
 
     filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.7, 0.9, 2.1, 1.2, 2.1])
-    day_pick = filter_col1.selectbox("Day", day_options, key="structure_day_filter")
+    day_pick = filter_col1.selectbox(
+        "Day",
+        day_options,
+        key="structure_day_filter",
+        on_change=_clear_structure_selection_for_navigation,
+    )
     filter_col2.caption("Manage days")
     if filter_col2.button(
         "Add/Delete days",
@@ -1661,6 +1807,7 @@ def _render_structure_tab(state) -> None:
         use_container_width=True,
         help="Open day operations for clone, clear, delete, or relabel.",
     ):
+        _clear_structure_selection_for_navigation()
         st.session_state.structure_day_tools_open = not bool(st.session_state.get("structure_day_tools_open", False))
         st.rerun()
     status_pick = filter_col4.selectbox(
@@ -1668,8 +1815,14 @@ def _render_structure_tab(state) -> None:
         options=["all", "active", "inactive"],
         format_func=lambda value: value.title(),
         key="structure_status_filter",
+        on_change=_clear_structure_selection_for_navigation,
     )
-    search_text = filter_col5.text_input("Search SessionTitle/SessionCode/Room", "", key="structure_search")
+    search_text = filter_col5.text_input(
+        "Search SessionTitle/SessionCode/Room",
+        "",
+        key="structure_search",
+        on_change=_clear_structure_selection_for_navigation,
+    )
     block_options = block_filter_labels_for_day(
         all_sessions,
         day_label=day_pick,
@@ -1687,6 +1840,7 @@ def _render_structure_tab(state) -> None:
         options=block_options,
         index=block_index,
         key="structure_block_filter",
+        on_change=_clear_structure_selection_for_navigation,
     )
 
     day_sessions = [session for session in all_sessions if _normalize_text(session.day_label) == day_pick]
@@ -1874,14 +2028,6 @@ def _render_structure_tab(state) -> None:
     c2.metric("Visible inactive sessions", visible_inactive)
     c3.metric("Visible open slots", visible_open_slots)
     c4.metric("Visible overflow papers", visible_overflow)
-    selection = st.session_state.get("structure_selection", {})
-    has_selection = isinstance(selection, dict) and _normalize_text(selection.get("kind", "")) in {
-        "session",
-        "room",
-        "empty_slot",
-        "new_room",
-    }
-
     def _on_select_session(session: object) -> None:
         _set_structure_selection(build_session_selection(session))
 
@@ -1926,6 +2072,7 @@ def _render_structure_tab(state) -> None:
             default=selected_room_defaults,
             key="structure_selected_rooms",
             help="All rooms are visible by default. Unselect rooms to simplify the view.",
+            on_change=_clear_structure_selection_for_navigation,
         )
         if not selected_rooms:
             st.info("Showing all rooms because no room is selected in the filter.")
@@ -1936,6 +2083,14 @@ def _render_structure_tab(state) -> None:
         visible_room_slice = [room for room in all_rooms if room in selected_room_set]
         matrix_view_data = {"rooms": visible_room_slice, "rows": matrix_rows}
         st.caption(f"Showing {len(visible_room_slice)} of {len(all_rooms)} room(s).")
+
+    selection = st.session_state.get("structure_selection", {})
+    has_selection = isinstance(selection, dict) and _normalize_text(selection.get("kind", "")) in {
+        "session",
+        "room",
+        "empty_slot",
+        "new_room",
+    }
 
     def _render_matrix() -> None:
         render_structure_matrix(
@@ -1986,6 +2141,7 @@ def _render_structure_tab(state) -> None:
         use_container_width=True,
         help="Append a new full row of sessions for all rooms in the selected day.",
     ):
+        _clear_structure_selection_for_navigation()
         st.session_state.structure_add_row_open = not bool(st.session_state.get("structure_add_row_open", False))
         st.rerun()
     add_row_col2.caption("Append one new block row across every room in this day.")
@@ -2095,6 +2251,7 @@ def _render_structure_tab(state) -> None:
         value=False,
         key="structure_show_advanced_tools",
         help="Enable table editor and secondary structure tools only when needed.",
+        on_change=_clear_structure_selection_for_navigation,
     )
     if not show_advanced_tools:
         return
@@ -2357,13 +2514,20 @@ def _quality_panel(edited_count: int, not_edited_count: int) -> None:
 
     inactive_assigned = int(v.get("inactive_assigned_papers", 0) or 0)
     inactive_overflow = int(v.get("inactive_overflow_papers", 0) or 0)
-    c9, c10 = st.columns(2)
+    archived_count = int(v.get("archived_papers", 0) or 0)
+    archived_by_reason = dict(v.get("archived_by_reason", {}) or {})
+    c9, c10, c11 = st.columns(3)
     c9.metric("Inactive-assigned papers", inactive_assigned)
     c10.metric("Inactive overflow papers", inactive_overflow)
+    c11.metric("Archived papers", archived_count)
     if inactive_assigned > 0:
         st.info(
             "Some papers are assigned to inactive sessions. They stay stored for planning but are hidden from active programme views."
         )
+    if archived_count > 0:
+        reason_bits = [f"{reason}: {count}" for reason, count in sorted(archived_by_reason.items()) if int(count) > 0]
+        if reason_bits:
+            st.caption(f"Archived by reason: {', '.join(reason_bits)}")
 
     if v.get("hard_constraints_ok", False):
         st.success("Hard constraints are valid (session grid and forbidden blocks).")
@@ -2387,6 +2551,9 @@ def _quality_panel(edited_count: int, not_edited_count: int) -> None:
                 "inactive_assigned_papers": v.get("inactive_assigned_papers", 0),
                 "inactive_assigned_submission_ids": v.get("inactive_assigned_submission_ids", []),
                 "inactive_overflow_by_session": v.get("inactive_overflow_by_session", {}),
+                "archived_papers": v.get("archived_papers", 0),
+                "archived_submission_ids": v.get("archived_submission_ids", []),
+                "archived_by_reason": v.get("archived_by_reason", {}),
                 "incomplete_sessions": v.get("incomplete_sessions", []),
                 "duplicate_session_codes": v.get("duplicate_session_codes", []),
                 "duplicate_session_slots": v.get("duplicate_session_slots", []),
@@ -2547,6 +2714,11 @@ def _render_programme_block_grid(
                     st.caption(f"Room: {room} | {session.session_code}")
                     session_button_label = _clip_text(session.session_title, title_limit)
                     session_is_selected = selected_kind == "session" and selected_session_id == session.session_id
+                    if session_is_selected:
+                        st.markdown(
+                            "<div style='height:4px;border-radius:6px;background:#1e88e5;margin-bottom:0.25rem;'></div>",
+                            unsafe_allow_html=True,
+                        )
                     if st.button(
                         session_button_label,
                         key=f"select_session_{session.session_id}_{session.day_num}_{session.block_num}",
@@ -2601,6 +2773,30 @@ def _on_inspector_paper_fields_change(submission_id: str) -> None:
         [{"SubmissionID": submission_id, "PrimaryTheme": theme, "Subtheme": subtheme, "OverrideNotes": notes}]
     )
     _apply_classification_edits_if_changed(edited_df)
+
+
+def _render_archive_controls(paper: object, scope_prefix: str) -> bool:
+    sid = _normalize_text(getattr(paper, "submission_id", ""))
+    if not sid:
+        return False
+
+    st.caption("Archive")
+    reason_key = f"{scope_prefix}_archive_reason_{sid}"
+    note_key = f"{scope_prefix}_archive_note_{sid}"
+    reason = st.selectbox(
+        "Archive reason",
+        ARCHIVE_REASON_OPTIONS,
+        key=reason_key,
+    )
+    note = st.text_area(
+        "Archive note (optional)",
+        key=note_key,
+        height=70,
+    )
+    if st.button("Archive Paper", key=f"{scope_prefix}_archive_btn_{sid}", use_container_width=True):
+        if _archive_paper(sid, reason, note):
+            return True
+    return False
 
 
 def _render_paper_slot_inspector(
@@ -2724,6 +2920,9 @@ def _render_paper_slot_inspector(
         on_change=_on_inspector_paper_fields_change,
         args=(paper.submission_id,),
     )
+    if _render_archive_controls(paper, scope_prefix="ins_slot"):
+        _clear_programme_selection()
+        st.rerun()
 
 
 def _render_empty_slot_inspector(state, session: object, talk_index: int) -> None:
@@ -2816,19 +3015,14 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
     if bool(st.session_state.get(title_edit_mode_key, False)):
         if title_draft_key not in st.session_state:
             st.session_state[title_draft_key] = session_title_raw
-        st.text_input("Session title", key=title_draft_key)
-        title_save_col, title_cancel_col = st.columns(2)
-        if title_save_col.button(
-            "Save title",
-            key=f"ins_session_title_save_{session.session_id}",
-            use_container_width=True,
-        ):
-            new_title = _normalize_text(st.session_state.get(title_draft_key, ""))
-            st.session_state[title_edit_mode_key] = False
-            if _apply_session_name_override(session.session_code, new_title):
-                st.rerun()
-            st.info("No title changes detected.")
-        if title_cancel_col.button(
+        st.text_input(
+            "Session title",
+            key=title_draft_key,
+            on_change=_submit_session_title_edit,
+            args=(session.session_code, title_draft_key, title_edit_mode_key),
+        )
+        st.caption("Press Enter to save.")
+        if st.button(
             "Cancel",
             key=f"ins_session_title_cancel_{session.session_id}",
             use_container_width=True,
@@ -3070,6 +3264,11 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
                         f"Moved {_paper_move_label(paper)} to unassigned.",
                     ):
                         st.rerun()
+                if _render_archive_controls(
+                    paper,
+                    scope_prefix=f"ins_ov_{session.session_id}_{overflow_pos}",
+                ):
+                    st.rerun()
 
 
 def _render_programme_inspector(state) -> None:
@@ -3219,6 +3418,13 @@ elif active_tab == "Paper List":
         apply_classification_edits_if_changed=_apply_classification_edits_if_changed,
         apply_paper_metadata_edits_if_changed=_apply_paper_metadata_edits_if_changed,
         apply_paper_session_selection_edit=_apply_paper_session_selection_edit,
+        apply_archive_paper=_archive_paper,
+    )
+elif active_tab == "Archived":
+    render_archived_tab(
+        state=state,
+        archive_overrides=load_paper_archive_overrides(PAPER_ARCHIVE_OVERRIDES_FILE),
+        restore_archived_paper=_restore_archived_paper,
     )
 elif active_tab == "Labels":
     render_labels_tab(

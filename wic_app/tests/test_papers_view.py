@@ -12,6 +12,7 @@ if str(APP_ROOT) not in sys.path:
 from ui.papers import (  # noqa: E402
     build_classification_update_df,
     build_paper_metadata_update_df,
+    format_paper_placement_label,
     build_session_options,
     default_session_option_for_paper,
     format_target_session_label,
@@ -98,6 +99,9 @@ class PapersViewTests(unittest.TestCase):
         self.assertIn('key=f"paper_row_details_{sid}"', text)
         self.assertIn('"Target Session"', text)
         self.assertIn("apply_paper_session_selection_edit", text)
+        self.assertIn("apply_archive_paper", text)
+        self.assertIn('"Archive reason"', text)
+        self.assertIn('"Archive Paper"', text)
         self.assertNotIn("Table view with Details editor. Hover presenter for abstract preview.", text)
         self.assertNotIn("paper_row_open_presenter_", text)
         self.assertNotIn("paper_row_open_theme_", text)
@@ -177,6 +181,52 @@ class PapersViewTests(unittest.TestCase):
         options, _ = build_session_options(state)
         selected = default_session_option_for_paper(state, "P1", options)
         self.assertEqual(selected, ("session", "A1"))
+
+    def test_paper_placement_label_uses_target_session_format(self) -> None:
+        session = SimpleNamespace(
+            session_id="A1",
+            session_code="S-A1",
+            session_title="Session Alpha",
+            day_label="Day 1",
+            time="09h00-10h00",
+            room="R1",
+            capacity=3,
+            papers=[object(), None, None],
+        )
+        paper = SimpleNamespace(
+            placement_status="scheduled",
+            session_id="A1",
+            session_title="Session Alpha",
+            session_code="S-A1",
+            day_label="Day 1",
+            time="09h00-10h00",
+            room="R1",
+        )
+        label = format_paper_placement_label(paper, {"A1": session})
+        self.assertEqual(label, "Session Alpha | R1 | Day 1 | 09h00-10h00 | Slots 1/3")
+
+    def test_paper_placement_label_marks_overflow(self) -> None:
+        session = SimpleNamespace(
+            session_id="A1",
+            session_code="S-A1",
+            session_title="Session Alpha",
+            day_label="Day 1",
+            time="09h00-10h00",
+            room="R1",
+            capacity=3,
+            papers=[object(), None, None],
+        )
+        paper = SimpleNamespace(
+            placement_status="overflow",
+            session_id="A1",
+            session_title="Session Alpha",
+            session_code="S-A1",
+            day_label="Day 1",
+            time="09h00-10h00",
+            room="R1",
+        )
+        label = format_paper_placement_label(paper, {"A1": session})
+        self.assertEqual(label, "Session Alpha | R1 | Day 1 | 09h00-10h00 | Slots 1/3 | Overflow")
 
 
 if __name__ == "__main__":

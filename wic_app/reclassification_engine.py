@@ -42,6 +42,7 @@ PROGRAMME_LAYOUT_OVERRIDES_FILE = STATE_DIR / "programme_layout_overrides.csv"
 SESSION_STRUCTURE_FILE = STATE_DIR / "session_structure.csv"
 PAPER_PLACEMENTS_FILE = STATE_DIR / "paper_placements.csv"
 PAPER_METADATA_OVERRIDES_FILE = STATE_DIR / "paper_metadata_overrides.csv"
+PAPER_ARCHIVE_OVERRIDES_FILE = STATE_DIR / "paper_archive_overrides.csv"
 MANUAL_TALKS_FILE = STATE_DIR / "manual_talks.csv"
 LABEL_CATALOG_FILE = STATE_DIR / "label_catalog.csv"
 EMPTY_LABEL_SENTINEL = "__WIC_EMPTY_LABEL__"
@@ -400,6 +401,18 @@ PAPER_METADATA_HEADERS = [
     "UpdatedAt",
 ]
 
+PAPER_ARCHIVE_HEADERS = [
+    "SubmissionID",
+    "ArchiveReason",
+    "ArchiveNote",
+    "ArchivedAt",
+    "PreviousPlacementStatus",
+    "PreviousSessionId",
+    "PreviousTalkIndex",
+    "PreviousOverflowOrder",
+    "UpdatedAt",
+]
+
 MANUAL_TALKS_HEADERS = [
     "SubmissionID",
     "FullName",
@@ -494,6 +507,7 @@ class ProgrammeState:
     sessions: List[Session]
     inactive_sessions: List[Session]
     all_sessions: List[Session]
+    archived_papers: List[Paper]
     validations: Dict[str, object]
     unassigned_papers: List[Paper] = field(default_factory=list)
     slot_conflicts: List[Dict[str, str]] = field(default_factory=list)
@@ -527,6 +541,7 @@ def _compute_edited_submission_ids(
     class_overrides: Dict[str, Dict[str, str]],
     layout_overrides: Dict[str, Dict[str, str]],
     metadata_overrides: Optional[Dict[str, Dict[str, str]]] = None,
+    archive_overrides: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> set[str]:
     edited: set[str] = set()
     for sid, row in class_overrides.items():
@@ -548,6 +563,14 @@ def _compute_edited_submission_ids(
 
     for sid, row in (metadata_overrides or {}).items():
         if str(row.get("TitleOverride", "")).strip() or str(row.get("AuthorOverride", "")).strip():
+            edited.add(sid)
+
+    for sid, row in (archive_overrides or {}).items():
+        if (
+            str(row.get("ArchiveReason", "")).strip()
+            or str(row.get("ArchiveNote", "")).strip()
+            or str(row.get("ArchivedAt", "")).strip()
+        ):
             edited.add(sid)
 
     return edited
@@ -892,6 +915,7 @@ def ensure_state_files(
     session_structure_file: Path = SESSION_STRUCTURE_FILE,
     paper_placements_file: Path = PAPER_PLACEMENTS_FILE,
     paper_metadata_overrides_file: Path = PAPER_METADATA_OVERRIDES_FILE,
+    paper_archive_overrides_file: Path = PAPER_ARCHIVE_OVERRIDES_FILE,
     manual_talks_file: Path = MANUAL_TALKS_FILE,
     label_catalog_file: Path = LABEL_CATALOG_FILE,
 ) -> None:
@@ -925,6 +949,11 @@ def ensure_state_files(
     if not paper_metadata_overrides_file.exists():
         with paper_metadata_overrides_file.open("w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=PAPER_METADATA_HEADERS)
+            writer.writeheader()
+
+    if not paper_archive_overrides_file.exists():
+        with paper_archive_overrides_file.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=PAPER_ARCHIVE_HEADERS)
             writer.writeheader()
 
     if not manual_talks_file.exists():
@@ -1110,6 +1139,63 @@ def write_paper_metadata_overrides(
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=PAPER_METADATA_HEADERS)
+        writer.writeheader()
+        for sid in sorted(normalized.keys(), key=lambda x: (len(x), x)):
+            writer.writerow(normalized[sid])
+
+
+def load_paper_archive_overrides(path: Path = PAPER_ARCHIVE_OVERRIDES_FILE) -> Dict[str, Dict[str, str]]:
+    rows = _load_csv_rows(path, PAPER_ARCHIVE_HEADERS)
+    out: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        sid = str(row.get("SubmissionID", "")).strip()
+        if not sid:
+            continue
+        placement_status = str(row.get("PreviousPlacementStatus", "")).strip().lower()
+        if placement_status not in {"scheduled", "unassigned", "overflow"}:
+            placement_status = "unassigned"
+        out[sid] = {
+            "SubmissionID": sid,
+            "ArchiveReason": str(row.get("ArchiveReason", "")).strip(),
+            "ArchiveNote": str(row.get("ArchiveNote", "")).strip(),
+            "ArchivedAt": str(row.get("ArchivedAt", "")).strip(),
+            "PreviousPlacementStatus": placement_status,
+            "PreviousSessionId": str(row.get("PreviousSessionId", "")).strip(),
+            "PreviousTalkIndex": str(row.get("PreviousTalkIndex", "")).strip(),
+            "PreviousOverflowOrder": str(row.get("PreviousOverflowOrder", "")).strip(),
+            "UpdatedAt": str(row.get("UpdatedAt", "")).strip(),
+        }
+    return out
+
+
+def write_paper_archive_overrides(
+    rows: Iterable[Dict[str, str]],
+    path: Path = PAPER_ARCHIVE_OVERRIDES_FILE,
+) -> None:
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    normalized: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        sid = str(row.get("SubmissionID", "")).strip()
+        if not sid:
+            continue
+        placement_status = str(row.get("PreviousPlacementStatus", "")).strip().lower()
+        if placement_status not in {"scheduled", "unassigned", "overflow"}:
+            placement_status = "unassigned"
+        normalized[sid] = {
+            "SubmissionID": sid,
+            "ArchiveReason": str(row.get("ArchiveReason", "")).strip(),
+            "ArchiveNote": str(row.get("ArchiveNote", "")).strip(),
+            "ArchivedAt": str(row.get("ArchivedAt", "")).strip() or now,
+            "PreviousPlacementStatus": placement_status,
+            "PreviousSessionId": str(row.get("PreviousSessionId", "")).strip(),
+            "PreviousTalkIndex": str(row.get("PreviousTalkIndex", "")).strip(),
+            "PreviousOverflowOrder": str(row.get("PreviousOverflowOrder", "")).strip(),
+            "UpdatedAt": str(row.get("UpdatedAt", "")).strip() or now,
+        }
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=PAPER_ARCHIVE_HEADERS)
         writer.writeheader()
         for sid in sorted(normalized.keys(), key=lambda x: (len(x), x)):
             writer.writerow(normalized[sid])
@@ -3160,6 +3246,7 @@ def build_programme_state(
     session_structure_path: Path = SESSION_STRUCTURE_FILE,
     paper_placements_path: Path = PAPER_PLACEMENTS_FILE,
     paper_metadata_overrides_path: Path = PAPER_METADATA_OVERRIDES_FILE,
+    paper_archive_overrides_path: Path = PAPER_ARCHIVE_OVERRIDES_FILE,
     manual_talks_path: Path = MANUAL_TALKS_FILE,
     config_path: Optional[Path] = None,
 ) -> ProgrammeState:
@@ -3180,6 +3267,7 @@ def build_programme_state(
         session_structure_path,
         paper_placements_path,
         paper_metadata_overrides_path,
+        paper_archive_overrides_path,
         manual_talks_path,
     )
 
@@ -3209,6 +3297,7 @@ def build_programme_state(
     classify_papers(papers, class_overrides)
     metadata_overrides = load_paper_metadata_overrides(paper_metadata_overrides_path)
     _apply_paper_metadata_overrides(papers, metadata_overrides)
+    archive_overrides = load_paper_archive_overrides(paper_archive_overrides_path)
     session_name_overrides = load_session_name_overrides(session_name_overrides_path)
 
     session_rows = load_session_structure_rows(session_structure_path)
@@ -3256,7 +3345,34 @@ def build_programme_state(
     active_sessions = [session for session in all_sessions if session.status == "active"]
     inactive_sessions = [session for session in all_sessions if session.status != "active"]
 
-    unassigned_papers, slot_conflicts = apply_paper_placements_core(papers, all_sessions, placements)
+    archived_submission_ids = {
+        paper.submission_id
+        for paper in papers
+        if paper.submission_id in archive_overrides
+    }
+    archived_papers: List[Paper] = []
+    active_papers: List[Paper] = []
+    for paper in papers:
+        if paper.submission_id in archived_submission_ids:
+            paper.placement_status = "unassigned"
+            paper.session_id = ""
+            paper.session_code = ""
+            paper.session_title = ""
+            paper.day_label = ""
+            paper.day_num = 0
+            paper.block_label = ""
+            paper.block_num = 0
+            paper.time = ""
+            paper.room = ""
+            paper.talk_index = 0
+            paper.overflow_order = 0
+            paper.talk_start_min = 0
+            paper.talk_end_min = 0
+            archived_papers.append(paper)
+        else:
+            active_papers.append(paper)
+
+    unassigned_papers, slot_conflicts = apply_paper_placements_core(active_papers, all_sessions, placements)
     _refresh_session_theme_metadata(all_sessions)
     for session in all_sessions:
         if session.session_code in session_name_overrides:
@@ -3267,19 +3383,33 @@ def build_programme_state(
         paper_placements_path=paper_placements_path,
         session_structure_path=session_structure_path,
     )
-    edited_submission_ids = _compute_edited_submission_ids(class_overrides, layout_overrides, metadata_overrides)
+    edited_submission_ids = _compute_edited_submission_ids(
+        class_overrides,
+        layout_overrides,
+        metadata_overrides,
+        archive_overrides,
+    )
+
+    archived_reason_counts: Dict[str, int] = {}
+    for paper in archived_papers:
+        reason = str(archive_overrides.get(paper.submission_id, {}).get("ArchiveReason", "")).strip() or "Other"
+        archived_reason_counts[reason] = archived_reason_counts.get(reason, 0) + 1
 
     state = ProgrammeState(
-        papers=papers,
+        papers=active_papers,
         sessions=active_sessions,
         inactive_sessions=inactive_sessions,
         all_sessions=all_sessions,
+        archived_papers=archived_papers,
         validations={},
         unassigned_papers=unassigned_papers,
         slot_conflicts=slot_conflicts,
         edited_submission_ids=edited_submission_ids,
     )
     state.validations = validate_programme_state(state, conference_config)
+    state.validations["archived_papers"] = len(archived_papers)
+    state.validations["archived_submission_ids"] = sorted([paper.submission_id for paper in archived_papers])
+    state.validations["archived_by_reason"] = dict(sorted(archived_reason_counts.items(), key=lambda item: item[0]))
     state.validations["edited_submission_ids"] = sorted(edited_submission_ids)
     state.validations["conference_config"] = resolve_config_path(config_path).as_posix()
     state.validations["conference_signature"] = conference_config.signature()

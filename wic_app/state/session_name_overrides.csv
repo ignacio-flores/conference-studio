@@ -1,23 +1,44 @@
 SessionCode,SessionTitleOverride,UpdatedAt
-D1-B1-R1-09,Drivers: Automation,2026-03-12T11:12:14
-D1-B1-R1-10,D1-B1-R1-10,2026-03-12T11:12:14
-D1-B1-R2-01,Long run wealth dynamics (Europe),2026-03-12T11:12:14
-D1-B1-R2-21,Environmental Inequality: Carbon tax,2026-03-12T11:12:14
-D1-B1-TBD-B,D1-B1-TBD-B,2026-03-12T11:12:14
-D1-B2-R1-09,Drivers: Wage bargaining,2026-03-12T11:12:14
-D1-B2-R1-10,Inequality measurement (1),2026-03-12T11:12:14
-D1-B2-R2-01,LSE Session,2026-03-12T11:12:14
-D1-B2-R2-20,Preferences for redistribution,2026-03-12T11:12:14
-D1-B2-R2-21,Drivers: Education and Human Capital (1),2026-03-12T11:12:14
-D1-B2-R3-71,Drivers: Race and Caste,2026-03-12T11:12:14
-D1-B3-R1-10,Tax evasion/elusion,2026-03-12T11:12:14
-D2-B1-R2-21,Gender inequality (1),2026-03-12T11:12:14
-D2-B1-TBD-B,Gender Inequality (2),2026-03-12T11:12:14
-D2-B2-R1-09,Environmental Inequalities,2026-03-12T11:12:14
-D2-B3-R2-01,Billionaire taxation,2026-03-12T11:12:14
-D2-B3-TBD-C,Inequality Perceptions: Preferences for redistribution,2026-03-12T11:12:14
-D2-B4-R1-09,Methods and measurement: Inflation,2026-03-12T11:12:14
-D2-B4-R1-10,Political Inequalities: Philantropy,2026-03-12T11:12:14
-D2-B4-R2-01,Intergenerational Mobility (1),2026-03-12T11:12:14
-D2-B4-R2-21,Gender Inequality (2),2026-03-12T11:12:14
-D2-B4-R3-71,Environmental Inequalities: Unequal consequences,2026-03-12T11:12:14
+D1-B1-R1-09,Automation,2026-03-12T17:19:24
+D1-B1-R1-10,D1-B1-R1-10,2026-03-12T17:19:24
+D1-B1-R2-01,Long run wealth in Europe,2026-03-12T17:19:24
+D1-B1-R2-20,Wage inequality,2026-03-12T17:19:24
+D1-B1-R2-21,Carbon Taxation,2026-03-12T17:19:24
+D1-B1-TBD-B,D1-B1-TBD-B,2026-03-12T17:19:24
+D1-B2-R1-09,Wage Bargaining,2026-03-12T17:19:24
+D1-B2-R1-10,Inequality Measurement (1),2026-03-12T17:19:24
+D1-B2-R2-01,LSE Session,2026-03-12T17:19:24
+D1-B2-R2-20,Preferences for redistribution,2026-03-12T17:19:24
+D1-B2-R2-21,Education and Human Capital,2026-03-12T17:19:24
+D1-B3-R1-09,Preferences for redistribution,2026-03-12T17:19:24
+D1-B3-R2-01,Momo's session,2026-03-12T17:19:24
+D1-B3-R2-20,Gender Inequality (1),2026-03-12T17:19:24
+D1-B3-R2-21,Tax Evasion/Elusion,2026-03-12T17:19:24
+D2-B1-R1-09,Intergenerational Mobility,2026-03-12T17:19:24
+D2-B1-R1-10,Tax Evasion/Elusion,2026-03-12T17:19:24
+D2-B1-R2-01,Gender Inequality (2),2026-03-12T17:19:24
+D2-B1-R2-21,Race and Caste,2026-03-12T17:19:24
+D2-B1-R3-71,Inequality Measurement (2),2026-03-12T17:19:24
+D2-B2-R1-09,Environmental Inequalities,2026-03-12T17:19:24
+D2-B2-R1-10,Inheritance,2026-03-12T17:19:24
+D2-B2-R2-01,Land inequality,2026-03-12T17:19:24
+D2-B2-R2-21,Distributional National Accounts,2026-03-12T17:19:24
+D2-B2-R3-71,Gender Inequality,2026-03-12T17:19:24
+D2-B3-R1-09,Sustainability,2026-03-12T17:19:24
+D2-B3-R1-10,Colonization,2026-03-12T17:19:24
+D2-B3-R2-01,Billionaire taxation,2026-03-12T17:19:24
+D2-B3-R2-21,Global inequalities,2026-03-12T17:19:24
+D2-B3-R3-71,Violence,2026-03-12T17:19:24
+D2-B4-R1-10,Philantropy,2026-03-12T17:19:24
+D2-B4-R2-01,Intergenerational Mobility (1),2026-03-12T17:19:24
+D2-B4-R2-21,Gender Inequality (3),2026-03-12T17:19:24
+D2-B4-R3-71,Consequences of Climate Change,2026-03-12T17:19:24
+D3-B1-R1-09,G,2026-03-12T17:19:24
+D3-B1-R1-10,Gender Inequality (4),2026-03-12T17:19:24
+D3-B1-R2-21,Spatial inequalities,2026-03-12T17:19:24
+D3-B1-R3-71,Political Inequality,2026-03-12T17:19:24
+D3-B2-R1-10,Pension wealth,2026-03-12T17:19:24
+D3-B2-R2-01,Taxation and Evasion/Elusion,2026-03-12T17:19:24
+D3-B2-R3-71,Inequality Perceptions,2026-03-12T17:19:24
+D3-B3-R1-09,Inflation,2026-03-12T17:19:24
+D3-B3-R2-01,Gender Inequality (5),2026-03-12T17:19:24

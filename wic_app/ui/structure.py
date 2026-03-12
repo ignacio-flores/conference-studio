@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 from typing import Callable, Dict, List, Optional, Sequence
 
 import streamlit as st
@@ -42,6 +43,51 @@ def _occupancy_color(used: int, capacity: int) -> str:
     if used == capacity:
         return "#2e7d32"
     return "#757575"
+
+
+def _format_block_time_cell(row: Dict[str, object]) -> str:
+    block_num = int(row.get("block_num", 0) or 0)
+    block_label = html.escape(_normalize_text(row.get("block_label", "")) or "[No block]")
+    time_label = html.escape(_normalize_text(row.get("time_label", "")) or "[No time]")
+    return (
+        "<div style='line-height:1.15;'>"
+        f"<div><strong>B{block_num} | {block_label}</strong></div>"
+        f"<div style='font-size:0.82rem;color:#5f6f86;margin-top:0.1rem;'>{time_label}</div>"
+        "</div>"
+    )
+
+
+def _session_hover_help(session: object) -> str:
+    session_code = _normalize_text(getattr(session, "session_code", "")) or "[No code]"
+    session_title = _normalize_text(getattr(session, "session_title", "")) or "[No session title]"
+    lines = [f"{session_code} | {session_title}"]
+
+    capacity = max(1, int(getattr(session, "capacity", 1) or 1))
+    papers = list(getattr(session, "papers", []) or [])
+    for talk_idx in range(1, capacity + 1):
+        lines.append("")
+        paper = papers[talk_idx - 1] if talk_idx - 1 < len(papers) else None
+        if paper is None:
+            lines.append(f"- Slot {talk_idx}: [Empty slot]")
+            continue
+        title = _normalize_text(getattr(paper, "title", "")) or "[No title]"
+        presenter = _normalize_text(getattr(paper, "full_name", "")) or "[No presenter]"
+        lines.append(f'- Slot {talk_idx}: "{_clip_text(title, 92)}" - {_clip_text(presenter, 52)}')
+
+    overflow_papers = list(getattr(session, "overflow_papers", []) or [])
+    if overflow_papers:
+        lines.append("")
+        lines.append(f"Overflow: {len(overflow_papers)}")
+        for idx, paper in enumerate(overflow_papers[:3], start=1):
+            lines.append("")
+            title = _normalize_text(getattr(paper, "title", "")) or "[No title]"
+            presenter = _normalize_text(getattr(paper, "full_name", "")) or "[No presenter]"
+            lines.append(f'- Overflow {idx}: "{_clip_text(title, 88)}" - {_clip_text(presenter, 48)}')
+        if len(overflow_papers) > 3:
+            lines.append("")
+            lines.append(f"... {len(overflow_papers) - 3} more overflow paper(s)")
+
+    return "\n".join(lines)
 
 
 def structure_session_counts(session: object, unassigned_count: int = 0) -> Dict[str, int]:
@@ -276,7 +322,7 @@ def render_structure_matrix(
 
     for row in rows:
         cols = st.columns([1.8] + [1.0] * len(rooms) + [0.7], gap="small")
-        cols[0].markdown(f"**{row['display_label']}**")
+        cols[0].markdown(_format_block_time_cell(row), unsafe_allow_html=True)
 
         for idx, room in enumerate(rooms, start=1):
             session = row["sessions_by_room"].get(room)
@@ -323,7 +369,6 @@ def render_structure_matrix(
                         selected_kind == "session"
                         and selected_session_id == _normalize_text(getattr(session, "session_id", ""))
                     )
-                    session_code = _normalize_text(getattr(session, "session_code", "")) or "[No code]"
                     session_title = _normalize_text(getattr(session, "session_title", "")) or "[No session title]"
                     session_button_label = _clip_text(session_title, title_limit)
                     if st.button(
@@ -331,7 +376,7 @@ def render_structure_matrix(
                         key=f"struct_session_{_normalize_text(getattr(session, 'session_id', ''))}",
                         type="primary" if session_is_selected else "secondary",
                         use_container_width=True,
-                        help=f"{session_code} | {session_title}",
+                        help=_session_hover_help(session),
                     ):
                         on_select_session(session)
                         st.rerun()

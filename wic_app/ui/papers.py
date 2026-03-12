@@ -19,6 +19,7 @@ paper_list_infinite_scroll_component = components.declare_component(
     "paper_list_infinite_scroll",
     path=str(PAPER_LIST_INFINITE_SCROLL_COMPONENT_DIR),
 )
+ARCHIVE_REASON_OPTIONS = ["Duplicate submission", "Author cancelled attendance", "Other"]
 
 
 def _normalize_text(value: object) -> str:
@@ -181,6 +182,27 @@ def format_target_session_label(session: object) -> str:
     return f"{title} | {room} | {day_label} | {time_label} | Slots {filled}/{capacity}"
 
 
+def format_paper_placement_label(paper: object, sessions_by_id: Dict[str, object]) -> str:
+    if paper is None:
+        return "Unassigned"
+    placement_status = _normalize_text(getattr(paper, "placement_status", "")).lower()
+    if placement_status not in {"scheduled", "overflow"}:
+        return "Unassigned"
+    session_id = _normalize_text(getattr(paper, "session_id", ""))
+    session = sessions_by_id.get(session_id)
+    if session is not None:
+        base = format_target_session_label(session)
+    else:
+        title = _clean_text(getattr(paper, "session_title", "")) or _clean_text(getattr(paper, "session_code", "")) or "[No session title]"
+        room = _clean_text(getattr(paper, "room", "")) or "[No room]"
+        day_label = _clean_text(getattr(paper, "day_label", "")) or "[No day]"
+        time_label = _clean_text(getattr(paper, "time", "")) or "[No time]"
+        base = f"{title} | {room} | {day_label} | {time_label} | Slots ?/?"
+    if placement_status == "overflow":
+        return f"{base} | Overflow"
+    return base
+
+
 def build_session_options(state) -> tuple[List[Tuple[str, str]], Dict[Tuple[str, str], str]]:
     options: List[Tuple[str, str]] = [("unassigned", "")]
     labels: Dict[Tuple[str, str], str] = {
@@ -248,6 +270,7 @@ def render_paper_list_tab(
     apply_classification_edits_if_changed: Callable[[pd.DataFrame], bool],
     apply_paper_metadata_edits_if_changed: Callable[[pd.DataFrame], bool],
     apply_paper_session_selection_edit: Callable[[str, Tuple[str, str]], bool],
+    apply_archive_paper: Callable[[str, str, str], bool],
 ) -> None:
     st.subheader("Paper List")
     edited_ids_set = set(edited_ids)
@@ -306,6 +329,12 @@ def render_paper_list_tab(
     edit_key = "paper_list_edit_submission_id"
     edit_sid = _normalize_text(st.session_state.get(edit_key, ""))
     session_options, session_labels = build_session_options(state)
+    paper_by_id = {
+        _normalize_text(getattr(paper, "submission_id", "")): paper for paper in list(getattr(state, "papers", []) or [])
+    }
+    sessions_by_id = {
+        _normalize_text(getattr(session, "session_id", "")): session for session in list(getattr(state, "all_sessions", []) or [])
+    }
     visible_ids = set(filtered["SubmissionID"].astype(str).tolist())
     if detail_sid and detail_sid not in visible_ids:
         st.session_state[detail_key] = ""
@@ -354,10 +383,7 @@ def render_paper_list_tab(
         row_cols[1].markdown(public_row["TitleHTML"], unsafe_allow_html=True)
         row_cols[2].caption(_clip_text(f"{public_row['Theme']} | {public_row['Subtheme']}", 62) or "[No theme]")
         row_cols[3].caption(_clip_text(public_row["Session"] or "[Unassigned]", 24))
-        placement = (
-            f"{public_row['Placement']} | {public_row['Session']} | "
-            f"{public_row['Day']} | {public_row['Block']} | {public_row['Room']}"
-        )
+        placement = format_paper_placement_label(paper_by_id.get(sid), sessions_by_id)
         row_cols[4].caption(_clip_text(placement, 86))
         details_label = "Hide" if is_details_open else "Details"
         if row_cols[5].button(
@@ -454,6 +480,22 @@ def render_paper_list_tab(
                 height=90,
                 key=f"paper_edit_notes_{sid}",
             )
+            st.caption("Archive")
+            archive_reason = st.selectbox(
+                "Archive reason",
+                ARCHIVE_REASON_OPTIONS,
+                key=f"paper_edit_archive_reason_{sid}",
+            )
+            archive_note = st.text_area(
+                "Archive note (optional)",
+                key=f"paper_edit_archive_note_{sid}",
+                height=70,
+            )
+            if st.button("Archive Paper", key=f"paper_edit_archive_{sid}", use_container_width=True):
+                if apply_archive_paper(sid, archive_reason, archive_note):
+                    st.session_state[edit_key] = ""
+                    st.session_state[detail_key] = ""
+                    st.rerun()
             save_col, cancel_col = st.columns(2)
             if save_col.button("Save", key=f"paper_edit_save_{sid}", use_container_width=True):
                 classification_row = build_classification_update_df(
