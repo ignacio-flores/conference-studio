@@ -2406,6 +2406,209 @@ def relabel_day_sessions(
     }
 
 
+def transfer_session_content(
+    source_session_id: str,
+    target_session_id: str,
+    mode: str,
+    session_structure_path: Path = SESSION_STRUCTURE_FILE,
+    paper_placements_path: Path = PAPER_PLACEMENTS_FILE,
+    session_name_overrides_path: Path = SESSION_NAME_OVERRIDES_FILE,
+    config_path: Optional[Path] = None,
+    source_effective_title: str = "",
+    target_effective_title: str = "",
+) -> Dict[str, object]:
+    source_id = str(source_session_id).strip()
+    target_id = str(target_session_id).strip()
+    mode_clean = str(mode).strip().lower()
+    if not source_id or not target_id:
+        return {"ok": False, "error": "Source and target SessionId are required."}
+    if source_id == target_id:
+        return {"ok": False, "error": "Source and target sessions must be different."}
+    if mode_clean not in {"replace", "swap"}:
+        return {"ok": False, "error": "Transfer mode must be 'replace' or 'swap'."}
+
+    rows = load_session_structure_rows(session_structure_path)
+    source_row = rows.get(source_id)
+    target_row = rows.get(target_id)
+    if source_row is None:
+        return {"ok": False, "error": f"Source session not found: {source_id}"}
+    if target_row is None:
+        return {"ok": False, "error": f"Target session not found: {target_id}"}
+
+    source_code = str(source_row.get("SessionCode", "")).strip()
+    target_code = str(target_row.get("SessionCode", "")).strip()
+    source_status = str(source_row.get("Status", "active")).strip().lower()
+    target_status = str(target_row.get("Status", "active")).strip().lower()
+    warnings: List[str] = []
+    if source_status != "active" or target_status != "active":
+        warnings.append(
+            "Transfer involves inactive session(s). "
+            f"Source={source_code or source_id} ({source_status or 'unknown'}), "
+            f"Target={target_code or target_id} ({target_status or 'unknown'})."
+        )
+
+    placements = load_paper_placements(paper_placements_path)
+    source_assignments: Dict[str, Dict[str, str]] = {}
+    target_assignments: Dict[str, Dict[str, str]] = {}
+    for submission_id, row in placements.items():
+        session_id = str(row.get("SessionId", "")).strip()
+        status = str(row.get("PlacementStatus", "")).strip().lower()
+        if status not in {"scheduled", "overflow"}:
+            continue
+        if session_id == source_id:
+            source_assignments[submission_id] = dict(row)
+        elif session_id == target_id:
+            target_assignments[submission_id] = dict(row)
+
+    def _max_scheduled_talk_index(rows_by_submission_id: Dict[str, Dict[str, str]]) -> int:
+        max_idx = 0
+        for row in rows_by_submission_id.values():
+            status = str(row.get("PlacementStatus", "")).strip().lower()
+            if status != "scheduled":
+                continue
+            max_idx = max(max_idx, _parse_positive_int(str(row.get("TalkIndex", "")).strip(), default=0))
+        return max_idx
+
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    source_capacity = _parse_positive_int(str(source_row.get("Capacity", "")).strip(), default=1)
+    target_capacity = _parse_positive_int(str(target_row.get("Capacity", "")).strip(), default=1)
+    max_source_talk_index = _max_scheduled_talk_index(source_assignments)
+    max_target_talk_index = _max_scheduled_talk_index(target_assignments)
+
+    capacity_updates = 0
+    updated_session_ids: set[str] = set()
+    if mode_clean == "replace":
+        resolved_target_capacity = max(target_capacity, source_capacity, max_source_talk_index, 1)
+        if resolved_target_capacity != target_capacity:
+            target_row = dict(target_row)
+            target_row["Capacity"] = str(resolved_target_capacity)
+            target_row["UpdatedAt"] = now
+            rows[target_id] = target_row
+            capacity_updates += 1
+            updated_session_ids.add(target_id)
+    else:
+        resolved_source_capacity = max(source_capacity, max_target_talk_index, 1)
+        resolved_target_capacity = max(target_capacity, max_source_talk_index, 1)
+        if resolved_source_capacity != source_capacity:
+            source_row = dict(source_row)
+            source_row["Capacity"] = str(resolved_source_capacity)
+            source_row["UpdatedAt"] = now
+            rows[source_id] = source_row
+            capacity_updates += 1
+            updated_session_ids.add(source_id)
+        if resolved_target_capacity != target_capacity:
+            target_row = dict(target_row)
+            target_row["Capacity"] = str(resolved_target_capacity)
+            target_row["UpdatedAt"] = now
+            rows[target_id] = target_row
+            capacity_updates += 1
+            updated_session_ids.add(target_id)
+
+    overrides = load_session_name_overrides(session_name_overrides_path)
+    rewritten_overrides = dict(overrides)
+    title_updates = 0
+    source_title = str(source_effective_title).strip()
+    target_title = str(target_effective_title).strip()
+
+    def _set_session_title_override(session_code: str, title: str) -> int:
+        code = str(session_code).strip()
+        if not code:
+            return 0
+        desired = str(title).strip()
+        current = str(rewritten_overrides.get(code, "")).strip()
+        if desired:
+            if current == desired:
+                return 0
+            rewritten_overrides[code] = desired
+            return 1
+        if code not in rewritten_overrides:
+            return 0
+        rewritten_overrides.pop(code, None)
+        return 1
+
+    if mode_clean == "replace":
+        title_updates += _set_session_title_override(target_code, source_title)
+        title_updates += _set_session_title_override(source_code, "")
+    else:
+        title_updates += _set_session_title_override(source_code, target_title)
+        title_updates += _set_session_title_override(target_code, source_title)
+
+    moved_to_target = 0
+    moved_to_source = 0
+    unassigned_from_target = 0
+    changed_submission_ids: set[str] = set()
+
+    def _rewrite_for_session(row: Dict[str, str], session_id: str) -> Dict[str, str]:
+        status = str(row.get("PlacementStatus", "")).strip().lower()
+        updated = dict(row)
+        updated["SessionId"] = str(session_id).strip()
+        if status == "scheduled":
+            updated["TalkIndex"] = str(row.get("TalkIndex", "")).strip()
+            updated["OverflowOrder"] = ""
+        elif status == "overflow":
+            updated["TalkIndex"] = ""
+            updated["OverflowOrder"] = str(row.get("OverflowOrder", "")).strip()
+        else:
+            updated["PlacementStatus"] = "unassigned"
+            updated["SessionId"] = ""
+            updated["TalkIndex"] = ""
+            updated["OverflowOrder"] = ""
+        updated["UpdatedAt"] = now
+        return updated
+
+    if mode_clean == "replace":
+        for submission_id, row in target_assignments.items():
+            updated = dict(row)
+            updated["PlacementStatus"] = "unassigned"
+            updated["SessionId"] = ""
+            updated["TalkIndex"] = ""
+            updated["OverflowOrder"] = ""
+            updated["UpdatedAt"] = now
+            placements[submission_id] = updated
+            unassigned_from_target += 1
+            changed_submission_ids.add(submission_id)
+        for submission_id, row in source_assignments.items():
+            placements[submission_id] = _rewrite_for_session(row, target_id)
+            moved_to_target += 1
+            changed_submission_ids.add(submission_id)
+    else:
+        for submission_id, row in source_assignments.items():
+            placements[submission_id] = _rewrite_for_session(row, target_id)
+            moved_to_target += 1
+            changed_submission_ids.add(submission_id)
+        for submission_id, row in target_assignments.items():
+            placements[submission_id] = _rewrite_for_session(row, source_id)
+            moved_to_source += 1
+            changed_submission_ids.add(submission_id)
+
+    config = load_conference_config(config_path)
+    validation_errors = validate_session_structure_rows(rows.values(), config)
+    if validation_errors:
+        return {"ok": False, "error": validation_errors[0], "errors": validation_errors}
+
+    if updated_session_ids:
+        write_session_structure_rows(rows.values(), session_structure_path)
+    if changed_submission_ids:
+        write_paper_placements(placements.values(), paper_placements_path)
+    if title_updates > 0:
+        write_session_name_overrides(rewritten_overrides, session_name_overrides_path)
+
+    return {
+        "ok": True,
+        "mode": mode_clean,
+        "source_session_id": source_id,
+        "target_session_id": target_id,
+        "source_session_code": source_code,
+        "target_session_code": target_code,
+        "moved_to_target": moved_to_target,
+        "moved_to_source": moved_to_source,
+        "unassigned_from_target": unassigned_from_target,
+        "capacity_updates": capacity_updates,
+        "title_updates": title_updates,
+        "warnings": warnings,
+    }
+
+
 def update_session_structure_row(
     session_id: str,
     updates: Dict[str, object],

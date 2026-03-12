@@ -6,7 +6,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
@@ -49,6 +49,7 @@ from reclassification_engine import (
     remove_session,
     restore_session,
     room_sort_key,
+    transfer_session_content,
     update_session_structure_row,
     validate_session_structure_rows,
     write_classification_overrides,
@@ -61,7 +62,7 @@ from reclassification_engine import (
 from ui.actions import render_top_actions
 from ui.inspector_layout import inject_sticky_inspector_css
 from ui.labels import render_labels_tab
-from ui.papers import render_paper_list_tab
+from ui.papers import format_target_session_label, render_paper_list_tab
 from ui.programme import render_programme_tab as render_programme_tab_view
 from ui.structure import (
     block_filter_labels_for_day,
@@ -409,6 +410,7 @@ def _apply_paper_session_selection_edit(submission_id: str, target_selection: tu
     if paper is None:
         st.error(f"Paper {sid} was not found.")
         return False
+    paper_label = _paper_move_label(paper)
 
     current_status = _normalize_text(getattr(paper, "placement_status", "")).lower()
     current_session_id = (
@@ -427,7 +429,7 @@ def _apply_paper_session_selection_edit(submission_id: str, target_selection: tu
                     "OverflowOrder": "",
                 }
             },
-            f"Moved {sid} to unassigned.",
+            f"Moved {paper_label} to unassigned.",
         )
 
     if kind != "session" or not target_session_id:
@@ -451,6 +453,7 @@ def _apply_paper_session_selection_edit(submission_id: str, target_selection: tu
             break
 
     if first_empty_slot is not None:
+        target_label = format_target_session_label(target_session)
         return _apply_layout_updates(
             {
                 sid: {
@@ -460,10 +463,11 @@ def _apply_paper_session_selection_edit(submission_id: str, target_selection: tu
                     "OverflowOrder": "",
                 }
             },
-            f"Moved {sid} to {target_session.session_code} slot {first_empty_slot}.",
+            f"Moved {paper_label} to {target_label} (slot {first_empty_slot}).",
         )
 
     overflow_order = len(list(getattr(target_session, "overflow_papers", []) or [])) + 1
+    target_label = format_target_session_label(target_session)
     return _apply_layout_updates(
         {
             sid: {
@@ -473,7 +477,7 @@ def _apply_paper_session_selection_edit(submission_id: str, target_selection: tu
                 "OverflowOrder": str(max(1, overflow_order)),
             }
         },
-        f"Moved {sid} to overflow in {target_session.session_code}.",
+        f"Moved {paper_label} to overflow in {target_label}.",
     )
 
 
@@ -662,6 +666,204 @@ def _apply_layout_updates(update_rows: Dict[str, Dict[str, object]], message: st
     write_paper_placements(merged.values(), PAPER_PLACEMENTS_FILE)
     _refresh_state(message)
     return True
+
+
+def _find_session_by_id(state, session_id: str) -> Optional[object]:
+    target_session_id = _normalize_text(session_id)
+    if not target_session_id:
+        return None
+    return next(
+        (
+            session
+            for session in list(getattr(state, "all_sessions", []) or [])
+            if _normalize_text(getattr(session, "session_id", "")) == target_session_id
+        ),
+        None,
+    )
+
+
+def _session_transfer_label(session: object) -> str:
+    status = _normalize_text(getattr(session, "status", "active")).lower() or "active"
+    if status == "active":
+        return format_target_session_label(session)
+    return f"{format_target_session_label(session)} [inactive]"
+
+
+def _apply_session_content_transfer(
+    source_session: object,
+    target_session: object,
+    mode: str,
+) -> Dict[str, object]:
+    snapshot = _snapshot_for_undo()
+    result = transfer_session_content(
+        source_session_id=_normalize_text(getattr(source_session, "session_id", "")),
+        target_session_id=_normalize_text(getattr(target_session, "session_id", "")),
+        mode=_normalize_text(mode).lower(),
+        session_structure_path=SESSION_STRUCTURE_FILE,
+        paper_placements_path=PAPER_PLACEMENTS_FILE,
+        session_name_overrides_path=SESSION_NAME_OVERRIDES_FILE,
+        config_path=_app_config_path(),
+        source_effective_title=_normalize_text(getattr(source_session, "session_title", "")),
+        target_effective_title=_normalize_text(getattr(target_session, "session_title", "")),
+    )
+    if not result.get("ok", False):
+        return result
+
+    changed_count = (
+        int(result.get("moved_to_target", 0) or 0)
+        + int(result.get("moved_to_source", 0) or 0)
+        + int(result.get("unassigned_from_target", 0) or 0)
+        + int(result.get("capacity_updates", 0) or 0)
+        + int(result.get("title_updates", 0) or 0)
+    )
+    if changed_count > 0:
+        _push_undo_snapshot(snapshot)
+
+    source_code = _normalize_text(result.get("source_session_code", "")) or _normalize_text(
+        getattr(source_session, "session_code", "")
+    )
+    target_code = _normalize_text(result.get("target_session_code", "")) or _normalize_text(
+        getattr(target_session, "session_code", "")
+    )
+    mode_label = "replace" if _normalize_text(result.get("mode", "")).lower() == "replace" else "swap"
+    warning_count = len([item for item in list(result.get("warnings", []) or []) if _normalize_text(item)])
+    summary = (
+        f"Transferred ({mode_label}) {source_code or '[source]'} -> {target_code or '[target]'} "
+        f"| to target: {int(result.get('moved_to_target', 0) or 0)}"
+    )
+    if mode_label == "swap":
+        summary += f", to source: {int(result.get('moved_to_source', 0) or 0)}"
+    else:
+        summary += f", unassigned from target: {int(result.get('unassigned_from_target', 0) or 0)}"
+    summary += (
+        f", capacity updates: {int(result.get('capacity_updates', 0) or 0)}"
+        f", title updates: {int(result.get('title_updates', 0) or 0)}"
+    )
+    if warning_count > 0:
+        summary += f", warnings: {warning_count}"
+    _refresh_state(summary + ".")
+    return result
+
+
+def _render_session_transfer_controls(
+    state,
+    source_session: object,
+    scope_prefix: str,
+    on_success_select_target: Callable[[str], None],
+    show_separator: bool = True,
+    show_title: bool = True,
+) -> None:
+    source_session_id = _normalize_text(getattr(source_session, "session_id", ""))
+    if not source_session_id:
+        return
+
+    all_sessions = sorted(
+        list(getattr(state, "all_sessions", []) or []),
+        key=_session_sort_key,
+    )
+    target_sessions = [
+        session
+        for session in all_sessions
+        if _normalize_text(getattr(session, "session_id", "")) != source_session_id
+    ]
+    if show_separator:
+        st.markdown("---")
+    if show_title:
+        st.caption("Transfer Content")
+    if not target_sessions:
+        st.info("No target session available for transfer.")
+        return
+
+    target_by_id = {
+        _normalize_text(getattr(session, "session_id", "")): session
+        for session in target_sessions
+        if _normalize_text(getattr(session, "session_id", ""))
+    }
+    target_options = list(target_by_id.keys())
+    if not target_options:
+        st.info("No target session available for transfer.")
+        return
+
+    target_key = f"{scope_prefix}_transfer_target_{source_session_id}"
+    mode_key = f"{scope_prefix}_transfer_mode_{source_session_id}"
+    pending_key = f"{scope_prefix}_transfer_pending_{source_session_id}"
+    if _normalize_text(st.session_state.get(target_key, "")) not in target_by_id:
+        st.session_state[target_key] = target_options[0]
+    if _normalize_text(st.session_state.get(mode_key, "")).lower() not in {"replace", "swap"}:
+        st.session_state[mode_key] = "replace"
+
+    target_session_id = st.selectbox(
+        "Transfer session to...",
+        target_options,
+        key=target_key,
+        format_func=lambda candidate_id: _session_transfer_label(target_by_id[candidate_id]),
+    )
+    mode = st.selectbox(
+        "Transfer mode",
+        ["replace", "swap"],
+        key=mode_key,
+        format_func=lambda value: "Replace" if value == "replace" else "Swap",
+    )
+    target_session = target_by_id.get(_normalize_text(target_session_id))
+    if target_session is None:
+        st.warning("Target session is no longer available.")
+        return
+
+    source_counts = structure_session_counts(source_session)
+    target_counts = structure_session_counts(target_session)
+    summary_col1, summary_col2 = st.columns(2)
+    summary_col1.caption(
+        f"Source: {_normalize_text(getattr(source_session, 'session_code', '')) or '[No code]'} | "
+        f"Filled {source_counts['filled']}/{source_counts['capacity']} | Overflow {source_counts['overflow']}"
+    )
+    summary_col2.caption(
+        f"Target: {_normalize_text(getattr(target_session, 'session_code', '')) or '[No code]'} | "
+        f"Filled {target_counts['filled']}/{target_counts['capacity']} | Overflow {target_counts['overflow']}"
+    )
+
+    source_status = _normalize_text(getattr(source_session, "status", "active")).lower() or "active"
+    target_status = _normalize_text(getattr(target_session, "status", "active")).lower() or "active"
+    if source_status != "active" or target_status != "active":
+        st.warning(
+            "Inactive session warning: "
+            f"source is {source_status}, target is {target_status}. Transfer is allowed."
+        )
+
+    if st.button("Transfer Content", key=f"{scope_prefix}_transfer_start_{source_session_id}", use_container_width=True):
+        st.session_state[pending_key] = {
+            "target_session_id": _normalize_text(target_session_id),
+            "mode": _normalize_text(mode).lower(),
+        }
+        st.rerun()
+
+    pending_payload = st.session_state.get(pending_key, {})
+    if not isinstance(pending_payload, dict) or not pending_payload:
+        return
+
+    pending_target_id = _normalize_text(pending_payload.get("target_session_id", ""))
+    pending_mode = _normalize_text(pending_payload.get("mode", "")).lower()
+    pending_target = target_by_id.get(pending_target_id)
+    if pending_target is None or pending_mode not in {"replace", "swap"}:
+        st.session_state[pending_key] = {}
+        return
+
+    mode_display = "Replace" if pending_mode == "replace" else "Swap"
+    st.warning(
+        f"Confirm {mode_display} transfer: "
+        f"{_normalize_text(getattr(source_session, 'session_code', '')) or '[source]'} -> "
+        f"{_normalize_text(getattr(pending_target, 'session_code', '')) or '[target]'}"
+    )
+    confirm_col, cancel_col = st.columns(2)
+    if confirm_col.button("Confirm transfer", key=f"{scope_prefix}_transfer_confirm_{source_session_id}", use_container_width=True):
+        result = _apply_session_content_transfer(source_session, pending_target, pending_mode)
+        if result.get("ok", False):
+            st.session_state[pending_key] = {}
+            on_success_select_target(pending_target_id)
+            st.rerun()
+        st.error(str(result.get("error", "Failed to transfer session content.")))
+    if cancel_col.button("Cancel", key=f"{scope_prefix}_transfer_cancel_{source_session_id}", use_container_width=True):
+        st.session_state[pending_key] = {}
+        st.rerun()
 
 
 def _undo_last_change() -> bool:
@@ -1045,6 +1247,21 @@ def _render_structure_session_inspector(state, session: object) -> None:
                 _refresh_state(f"Restored {session.session_code}.")
                 st.rerun()
             st.error(str(result.get("error", "Failed to restore session.")))
+
+    def _select_structure_target_session(target_session_id: str) -> None:
+        refreshed_state = st.session_state.wic_state
+        target_session = _find_session_by_id(refreshed_state, target_session_id)
+        if target_session is None:
+            _clear_structure_selection()
+            return
+        _set_structure_selection(build_session_selection(target_session))
+
+    _render_session_transfer_controls(
+        state=state,
+        source_session=session,
+        scope_prefix="struct",
+        on_success_select_target=_select_structure_target_session,
+    )
 
 
 def _render_structure_room_inspector(state, selection: Dict[str, object]) -> None:
@@ -1736,25 +1953,8 @@ def _render_structure_tab(state) -> None:
     if not has_selection:
         st.session_state.structure_inspector_open = False
     else:
-        inspector_open = bool(st.session_state.get("structure_inspector_open", True))
-        inspector_col1, inspector_col2 = st.columns([3.0, 1.2])
-        inspector_col1.caption("Selection active. Open inspector to edit the selected session/room/slot.")
-        if inspector_open:
-            if inspector_col2.button(
-                "Hide inspector",
-                key="structure_hide_inspector_dialog",
-                use_container_width=True,
-            ):
-                st.session_state.structure_inspector_open = False
-                st.rerun()
-        else:
-            if inspector_col2.button(
-                "Show inspector",
-                key="structure_show_inspector_dialog",
-                use_container_width=True,
-            ):
-                st.session_state.structure_inspector_open = True
-                st.rerun()
+        st.session_state.structure_inspector_open = True
+        st.caption("Selection active. Use the inspector to edit the selected session/room/slot.")
 
         @st.dialog("Structure inspector", width="large")
         def _open_structure_inspector_dialog() -> None:
@@ -1776,8 +1976,7 @@ def _render_structure_tab(state) -> None:
                 clear_selection=_clear_structure_selection,
             )
 
-        if bool(st.session_state.get("structure_inspector_open", False)):
-            _open_structure_inspector_dialog()
+        _open_structure_inspector_dialog()
 
     st.markdown("---")
     add_row_col1, add_row_col2 = st.columns([1.1, 3.9])
@@ -2272,6 +2471,16 @@ def _paper_location_summary(paper: object) -> str:
     return "Unknown placement"
 
 
+def _paper_move_label(paper: object) -> str:
+    title = _clean_display_text(getattr(paper, "title", ""))
+    if title:
+        return f"\"{_clip_text(title, 72)}\""
+    presenter = _clean_display_text(getattr(paper, "full_name", ""))
+    if presenter:
+        return _clip_text(presenter, 72)
+    return "Paper"
+
+
 def _candidate_sort_key(paper: object) -> tuple:
     status = _normalize_text(getattr(paper, "placement_status", "")).lower()
     status_rank = {"unassigned": 0, "overflow": 1, "scheduled": 2}
@@ -2463,7 +2672,7 @@ def _render_paper_slot_inspector(
             selected = next((s for s in all_sessions if s.session_id == session_id), None)
             if selected is None:
                 return session_id
-            return f"{selected.session_code} | {selected.day_label} | {selected.time} | {selected.room} | cap {selected.capacity}"
+            return format_target_session_label(selected)
 
         target_session_id = st.selectbox(
             "Target Session",
@@ -2481,6 +2690,7 @@ def _render_paper_slot_inspector(
             key=f"ins_move_slot_{paper.submission_id}",
         )
         if st.button("Move Paper", key=f"ins_move_btn_{paper.submission_id}", use_container_width=True):
+            target_label = format_target_session_label(target_session) if target_session is not None else "the selected session"
             if _apply_layout_updates(
                 {
                     paper.submission_id: {
@@ -2490,7 +2700,7 @@ def _render_paper_slot_inspector(
                         "OverflowOrder": "",
                     }
                 },
-                f"Moved {paper.submission_id} to {target_session.session_code if target_session else target_session_id} slot {target_slot}.",
+                f"Moved {_paper_move_label(paper)} to {target_label} (slot {target_slot}).",
             ):
                 st.rerun()
 
@@ -2504,7 +2714,7 @@ def _render_paper_slot_inspector(
                         "OverflowOrder": "",
                     }
                 },
-            f"Moved {paper.submission_id} to unassigned.",
+            f"Moved {_paper_move_label(paper)} to unassigned.",
         ):
             st.rerun()
     st.text_area(
@@ -2543,7 +2753,13 @@ def _render_empty_slot_inspector(state, session: object, talk_index: int) -> Non
         name = _clip_text(_clean_display_text(paper.full_name), 40)
         title = _clip_text(_clean_display_text(paper.title), 68)
         placement = _paper_location_summary(paper)
-        return f"{sid} | {name} | {title} [{placement}]"
+        if name and title:
+            return f"{name} | \"{title}\" [{placement}]"
+        if title:
+            return f"\"{title}\" [{placement}]"
+        if name:
+            return f"{name} [{placement}]"
+        return f"Untitled paper [{placement}]"
 
     pick = st.selectbox(
         "Assign or move paper",
@@ -2562,6 +2778,7 @@ def _render_empty_slot_inspector(state, session: object, talk_index: int) -> Non
     ):
         sid = _normalize_text(pick)
         if sid:
+            paper_label = _paper_move_label(selected_paper) if selected_paper is not None else "Paper"
             if _apply_layout_updates(
                 {
                     sid: {
@@ -2571,7 +2788,7 @@ def _render_empty_slot_inspector(state, session: object, talk_index: int) -> Non
                         "OverflowOrder": "",
                     }
                 },
-                f"Assigned {sid} to {session.session_code} slot {talk_index}.",
+                f"Assigned {paper_label} to {format_target_session_label(session)} (slot {talk_index}).",
             ):
                 st.rerun()
 
@@ -2661,28 +2878,31 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
             _refresh_state(f"Updated structure for {session.session_code}.")
             st.rerun()
 
-    st.markdown("---")
-    for talk_idx in range(1, max(1, session.capacity) + 1):
-        paper = session.papers[talk_idx - 1]
-        if paper is None:
+    session_counts = structure_session_counts(session)
+    with st.expander(
+        f"Session slots ({session_counts['filled']}/{session_counts['capacity']} filled)",
+        expanded=False,
+    ):
+        for talk_idx in range(1, max(1, session.capacity) + 1):
+            paper = session.papers[talk_idx - 1]
+            if paper is None:
+                if st.button(
+                    f"Slot {talk_idx}: [Empty slot]",
+                    key=f"ins_open_empty_{session.session_id}_{talk_idx}",
+                    use_container_width=True,
+                ):
+                    _set_programme_selection("slot", session.session_id, talk_idx)
+                    st.rerun()
+                continue
+            presenter = _clip_text(_clean_display_text(paper.full_name) or "[No presenter]", 52)
             if st.button(
-                f"Slot {talk_idx}: [Empty slot]",
-                key=f"ins_open_empty_{session.session_id}_{talk_idx}",
+                f"Slot {talk_idx}: {presenter}",
+                key=f"ins_open_slot_{session.session_id}_{talk_idx}",
                 use_container_width=True,
             ):
                 _set_programme_selection("slot", session.session_id, talk_idx)
                 st.rerun()
-            continue
-        presenter = _clip_text(_clean_display_text(paper.full_name) or "[No presenter]", 52)
-        if st.button(
-            f"Slot {talk_idx}: {presenter}",
-            key=f"ins_open_slot_{session.session_id}_{talk_idx}",
-            use_container_width=True,
-        ):
-            _set_programme_selection("slot", session.session_id, talk_idx)
-            st.rerun()
 
-    st.caption("Session Lifecycle")
     action_col1, action_col2 = st.columns(2)
     clear_pending_key = f"ins_confirm_clear_pending_{session.session_id}"
     remove_pending_key = f"ins_confirm_remove_pending_{session.session_id}"
@@ -2753,89 +2973,103 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
             st.session_state[remove_pending_key] = False
             st.rerun()
 
-    st.caption(f"Overflow papers: {len(session.overflow_papers)}")
-    if not session.overflow_papers:
-        st.info("No overflow papers in this session.")
-        return
+    def _select_programme_target_session(target_session_id: str) -> None:
+        _set_programme_selection("session", target_session_id, 0)
 
-    for overflow_pos, paper in enumerate(session.overflow_papers, start=1):
-        with st.expander(f"Overflow {overflow_pos}: {paper.submission_id} | {_clip_text(paper.title, 62)}", expanded=False):
-            presenter = _clean_display_text(paper.full_name)
-            title = _clean_display_text(paper.title)
-            abstract_preview = _preview_abstract(paper.abstract)
-            pdf_url = _normalize_text(paper.link_to_pdf)
-            if pdf_url.startswith("http"):
-                st.markdown(
-                    f"<b>{html.escape(presenter)}</b><br>"
-                    f"<a href='{html.escape(pdf_url)}' target='_blank' rel='noopener noreferrer' "
-                    f"title='{html.escape(abstract_preview)}'>{html.escape(title)}</a>",
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(
-                    f"<b>{html.escape(presenter)}</b><br>"
-                    f"<span title='{html.escape(abstract_preview)}'>{html.escape(title)}</span>",
-                    unsafe_allow_html=True,
-                )
+    _render_session_transfer_controls(
+        state=state,
+        source_session=session,
+        scope_prefix="prog",
+        on_success_select_target=_select_programme_target_session,
+        show_separator=False,
+        show_title=False,
+    )
 
-            session_ids = [s.session_id for s in all_sessions]
-            default_idx = session_ids.index(session.session_id) if session.session_id in session_ids else 0
-            target_session_id = st.selectbox(
-                "Target Session",
-                session_ids,
-                index=default_idx,
-                key=f"ins_ov_target_session_{paper.submission_id}_{session.session_id}_{overflow_pos}",
-                format_func=lambda session_id: next(
-                    (
-                        f"{s.session_code} | {s.day_label} | {s.time} | {s.room} | cap {s.capacity}"
-                        for s in all_sessions
-                        if s.session_id == session_id
+    overflow_count = len(session.overflow_papers)
+    with st.expander(f"Overflow papers ({overflow_count})", expanded=False):
+        if not session.overflow_papers:
+            st.info("No overflow papers in this session.")
+            return
+
+        for overflow_pos, paper in enumerate(session.overflow_papers, start=1):
+            with st.expander(f"Overflow {overflow_pos}: {paper.submission_id} | {_clip_text(paper.title, 62)}", expanded=False):
+                presenter = _clean_display_text(paper.full_name)
+                title = _clean_display_text(paper.title)
+                abstract_preview = _preview_abstract(paper.abstract)
+                pdf_url = _normalize_text(paper.link_to_pdf)
+                if pdf_url.startswith("http"):
+                    st.markdown(
+                        f"<b>{html.escape(presenter)}</b><br>"
+                        f"<a href='{html.escape(pdf_url)}' target='_blank' rel='noopener noreferrer' "
+                        f"title='{html.escape(abstract_preview)}'>{html.escape(title)}</a>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f"<b>{html.escape(presenter)}</b><br>"
+                        f"<span title='{html.escape(abstract_preview)}'>{html.escape(title)}</span>",
+                        unsafe_allow_html=True,
+                    )
+
+                session_ids = [s.session_id for s in all_sessions]
+                default_idx = session_ids.index(session.session_id) if session.session_id in session_ids else 0
+                target_session_id = st.selectbox(
+                    "Target Session",
+                    session_ids,
+                    index=default_idx,
+                    key=f"ins_ov_target_session_{paper.submission_id}_{session.session_id}_{overflow_pos}",
+                    format_func=lambda session_id: next(
+                        (
+                            format_target_session_label(s)
+                            for s in all_sessions
+                            if s.session_id == session_id
+                        ),
+                        session_id,
                     ),
-                    session_id,
-                ),
-            )
-            target_session = next((s for s in all_sessions if s.session_id == target_session_id), None)
-            target_capacity = max(1, int(getattr(target_session, "capacity", 1) if target_session is not None else 1))
-            target_slot = st.selectbox(
-                "Target Slot",
-                list(range(1, target_capacity + 1)),
-                index=0,
-                key=f"ins_ov_target_slot_{paper.submission_id}_{session.session_id}_{overflow_pos}",
-            )
-            if st.button(
-                "Move Overflow Paper",
-                key=f"ins_ov_move_{paper.submission_id}_{session.session_id}_{overflow_pos}",
-                use_container_width=True,
-            ):
-                if _apply_layout_updates(
-                    {
-                        paper.submission_id: {
-                            "PlacementStatus": "scheduled",
-                            "SessionId": target_session_id,
-                            "TalkIndex": str(target_slot),
-                            "OverflowOrder": "",
-                        }
-                    },
-                    f"Moved {paper.submission_id} to {target_session.session_code if target_session else target_session_id} slot {target_slot}.",
+                )
+                target_session = next((s for s in all_sessions if s.session_id == target_session_id), None)
+                target_capacity = max(1, int(getattr(target_session, "capacity", 1) if target_session is not None else 1))
+                target_slot = st.selectbox(
+                    "Target Slot",
+                    list(range(1, target_capacity + 1)),
+                    index=0,
+                    key=f"ins_ov_target_slot_{paper.submission_id}_{session.session_id}_{overflow_pos}",
+                )
+                if st.button(
+                    "Move Overflow Paper",
+                    key=f"ins_ov_move_{paper.submission_id}_{session.session_id}_{overflow_pos}",
+                    use_container_width=True,
                 ):
-                    st.rerun()
-            if st.button(
-                "Drop Overflow To Unassigned",
-                key=f"ins_ov_drop_{paper.submission_id}_{session.session_id}_{overflow_pos}",
-                use_container_width=True,
-            ):
-                if _apply_layout_updates(
-                    {
-                        paper.submission_id: {
-                            "PlacementStatus": "unassigned",
-                            "SessionId": "",
-                            "TalkIndex": "",
-                            "OverflowOrder": "",
-                        }
-                    },
-                    f"Moved {paper.submission_id} to unassigned.",
+                    target_label = format_target_session_label(target_session) if target_session is not None else "the selected session"
+                    if _apply_layout_updates(
+                        {
+                            paper.submission_id: {
+                                "PlacementStatus": "scheduled",
+                                "SessionId": target_session_id,
+                                "TalkIndex": str(target_slot),
+                                "OverflowOrder": "",
+                            }
+                        },
+                        f"Moved {_paper_move_label(paper)} to {target_label} (slot {target_slot}).",
+                    ):
+                        st.rerun()
+                if st.button(
+                    "Drop Overflow To Unassigned",
+                    key=f"ins_ov_drop_{paper.submission_id}_{session.session_id}_{overflow_pos}",
+                    use_container_width=True,
                 ):
-                    st.rerun()
+                    if _apply_layout_updates(
+                        {
+                            paper.submission_id: {
+                                "PlacementStatus": "unassigned",
+                                "SessionId": "",
+                                "TalkIndex": "",
+                                "OverflowOrder": "",
+                            }
+                        },
+                        f"Moved {_paper_move_label(paper)} to unassigned.",
+                    ):
+                        st.rerun()
 
 
 def _render_programme_inspector(state) -> None:

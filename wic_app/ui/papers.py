@@ -157,6 +157,30 @@ def _session_status_rank(status: str) -> int:
     return 3
 
 
+def _session_slot_counts(session: object) -> tuple[int, int]:
+    papers = list(getattr(session, "papers", []) or [])
+    try:
+        capacity = int(getattr(session, "capacity", len(papers)) or len(papers))
+    except (TypeError, ValueError):
+        capacity = len(papers)
+    capacity = max(1, capacity, len(papers))
+    filled = len([paper for paper in papers if paper is not None])
+    return min(filled, capacity), capacity
+
+
+def format_target_session_label(session: object) -> str:
+    title = _clean_text(getattr(session, "session_title", ""))
+    if not title:
+        title = _clean_text(getattr(session, "session_code", ""))
+    if not title:
+        title = "[No session title]"
+    room = _clean_text(getattr(session, "room", "")) or "[No room]"
+    day_label = _clean_text(getattr(session, "day_label", "")) or "[No day]"
+    time_label = _clean_text(getattr(session, "time", "")) or "[No time]"
+    filled, capacity = _session_slot_counts(session)
+    return f"{title} | {room} | {day_label} | {time_label} | Slots {filled}/{capacity}"
+
+
 def build_session_options(state) -> tuple[List[Tuple[str, str]], Dict[Tuple[str, str], str]]:
     options: List[Tuple[str, str]] = [("unassigned", "")]
     labels: Dict[Tuple[str, str], str] = {
@@ -177,14 +201,9 @@ def build_session_options(state) -> tuple[List[Tuple[str, str]], Dict[Tuple[str,
         session_id = _normalize_text(getattr(session, "session_id", ""))
         if not session_id:
             continue
-        status = _normalize_text(getattr(session, "status", "")).lower() or "inactive"
-        code = _normalize_text(getattr(session, "session_code", "")) or "[No code]"
-        day_label = _normalize_text(getattr(session, "day_label", ""))
-        time_label = _normalize_text(getattr(session, "time", ""))
-        room = _normalize_text(getattr(session, "room", ""))
         option = ("session", session_id)
         options.append(option)
-        labels[option] = f"{code} | {day_label} | {time_label} | {room} [{status}]"
+        labels[option] = format_target_session_label(session)
 
     return options, labels
 

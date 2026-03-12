@@ -42,6 +42,7 @@ from reclassification_engine import (
     rename_room_for_day,
     remove_session,
     restore_session,
+    transfer_session_content,
     update_session_structure_row,
     write_paper_placements,
     write_paper_metadata_overrides,
@@ -865,6 +866,289 @@ class EngineTests(unittest.TestCase):
             overrides_after = load_session_name_overrides(paths["session_names"])
             self.assertNotIn(old_code, overrides_after)
             self.assertIn("Relabeled Session Title", set(overrides_after.values()))
+
+    def test_transfer_session_content_replace_moves_title_slots_overflow_and_resizes_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            state = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            candidate_sessions = [session for session in state.sessions if any(paper is not None for paper in session.papers)]
+            self.assertGreaterEqual(len(candidate_sessions), 2)
+            source = candidate_sessions[0]
+            target = candidate_sessions[1]
+
+            rows = load_session_structure_rows(paths["structure"])
+            rows[source.session_id]["Capacity"] = "5"
+            rows[target.session_id]["Capacity"] = "2"
+            rows[target.session_id]["Status"] = "inactive"
+            write_session_structure_rows(rows.values(), paths["structure"])
+
+            placements = load_paper_placements(paths["placements"])
+            source_rows = {
+                sid: dict(row)
+                for sid, row in placements.items()
+                if str(row.get("SessionId", "")).strip() == source.session_id
+                and str(row.get("PlacementStatus", "")).strip().lower() in {"scheduled", "overflow"}
+            }
+            target_rows = {
+                sid: dict(row)
+                for sid, row in placements.items()
+                if str(row.get("SessionId", "")).strip() == target.session_id
+                and str(row.get("PlacementStatus", "")).strip().lower() in {"scheduled", "overflow"}
+            }
+            self.assertTrue(source_rows)
+            self.assertTrue(target_rows)
+            if not any(str(row.get("PlacementStatus", "")).strip().lower() == "overflow" for row in source_rows.values()):
+                source_sid_for_overflow = next(
+                    (
+                        sid
+                        for sid, row in source_rows.items()
+                        if str(row.get("PlacementStatus", "")).strip().lower() == "scheduled"
+                    ),
+                    "",
+                )
+                self.assertTrue(source_sid_for_overflow)
+                placements[source_sid_for_overflow]["PlacementStatus"] = "overflow"
+                placements[source_sid_for_overflow]["TalkIndex"] = ""
+                placements[source_sid_for_overflow]["OverflowOrder"] = "1"
+                write_paper_placements(placements.values(), paths["placements"])
+                placements = load_paper_placements(paths["placements"])
+                source_rows = {
+                    sid: dict(row)
+                    for sid, row in placements.items()
+                    if str(row.get("SessionId", "")).strip() == source.session_id
+                    and str(row.get("PlacementStatus", "")).strip().lower() in {"scheduled", "overflow"}
+                }
+
+            write_session_name_overrides(
+                {
+                    source.session_code: "Source Previous Override",
+                    target.session_code: "Target Previous Override",
+                },
+                paths["session_names"],
+            )
+
+            result = transfer_session_content(
+                source_session_id=source.session_id,
+                target_session_id=target.session_id,
+                mode="replace",
+                session_structure_path=paths["structure"],
+                paper_placements_path=paths["placements"],
+                session_name_overrides_path=paths["session_names"],
+                source_effective_title="Source Effective Title",
+                target_effective_title="Target Effective Title",
+            )
+            self.assertTrue(result.get("ok", False))
+            self.assertEqual(int(result.get("moved_to_target", 0) or 0), len(source_rows))
+            self.assertEqual(int(result.get("moved_to_source", 0) or 0), 0)
+            self.assertEqual(int(result.get("unassigned_from_target", 0) or 0), len(target_rows))
+            self.assertGreaterEqual(int(result.get("capacity_updates", 0) or 0), 1)
+            self.assertGreaterEqual(int(result.get("title_updates", 0) or 0), 1)
+            self.assertTrue(result.get("warnings", []))
+
+            rows_after = load_session_structure_rows(paths["structure"])
+            self.assertEqual(str(rows_after[target.session_id].get("Capacity", "")).strip(), "5")
+            placements_after = load_paper_placements(paths["placements"])
+            for sid, before_row in source_rows.items():
+                updated = placements_after[sid]
+                self.assertEqual(str(updated.get("SessionId", "")).strip(), target.session_id)
+                self.assertEqual(
+                    str(updated.get("PlacementStatus", "")).strip().lower(),
+                    str(before_row.get("PlacementStatus", "")).strip().lower(),
+                )
+                if str(before_row.get("PlacementStatus", "")).strip().lower() == "scheduled":
+                    self.assertEqual(
+                        str(updated.get("TalkIndex", "")).strip(),
+                        str(before_row.get("TalkIndex", "")).strip(),
+                    )
+                if str(before_row.get("PlacementStatus", "")).strip().lower() == "overflow":
+                    self.assertEqual(
+                        str(updated.get("OverflowOrder", "")).strip(),
+                        str(before_row.get("OverflowOrder", "")).strip(),
+                    )
+            for sid in target_rows:
+                updated = placements_after[sid]
+                self.assertEqual(str(updated.get("PlacementStatus", "")).strip().lower(), "unassigned")
+                self.assertEqual(str(updated.get("SessionId", "")).strip(), "")
+
+            overrides_after = load_session_name_overrides(paths["session_names"])
+            self.assertNotIn(source.session_code, overrides_after)
+            self.assertEqual(overrides_after.get(target.session_code, ""), "Source Effective Title")
+
+    def test_transfer_session_content_swap_exchanges_slots_overflow_titles_and_resizes_both(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            state = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            candidate_sessions = [session for session in state.sessions if session.session_id and session.session_code]
+            self.assertGreaterEqual(len(candidate_sessions), 2)
+            source = candidate_sessions[0]
+            target = candidate_sessions[1]
+
+            all_submission_ids = [paper.submission_id for paper in state.papers if paper.submission_id]
+            self.assertGreaterEqual(len(all_submission_ids), 4)
+            sid_source_scheduled, sid_source_overflow, sid_target_scheduled, sid_target_overflow = all_submission_ids[:4]
+
+            placements = load_paper_placements(paths["placements"])
+            for row in placements.values():
+                if str(row.get("SessionId", "")).strip() in {source.session_id, target.session_id}:
+                    row["PlacementStatus"] = "unassigned"
+                    row["SessionId"] = ""
+                    row["TalkIndex"] = ""
+                    row["OverflowOrder"] = ""
+            placements[sid_source_scheduled]["PlacementStatus"] = "scheduled"
+            placements[sid_source_scheduled]["SessionId"] = source.session_id
+            placements[sid_source_scheduled]["TalkIndex"] = "2"
+            placements[sid_source_scheduled]["OverflowOrder"] = ""
+            placements[sid_source_overflow]["PlacementStatus"] = "overflow"
+            placements[sid_source_overflow]["SessionId"] = source.session_id
+            placements[sid_source_overflow]["TalkIndex"] = ""
+            placements[sid_source_overflow]["OverflowOrder"] = "2"
+            placements[sid_target_scheduled]["PlacementStatus"] = "scheduled"
+            placements[sid_target_scheduled]["SessionId"] = target.session_id
+            placements[sid_target_scheduled]["TalkIndex"] = "3"
+            placements[sid_target_scheduled]["OverflowOrder"] = ""
+            placements[sid_target_overflow]["PlacementStatus"] = "overflow"
+            placements[sid_target_overflow]["SessionId"] = target.session_id
+            placements[sid_target_overflow]["TalkIndex"] = ""
+            placements[sid_target_overflow]["OverflowOrder"] = "1"
+            write_paper_placements(placements.values(), paths["placements"])
+
+            rows = load_session_structure_rows(paths["structure"])
+            rows[source.session_id]["Capacity"] = "1"
+            rows[target.session_id]["Capacity"] = "1"
+            rows[source.session_id]["Status"] = "active"
+            rows[target.session_id]["Status"] = "active"
+            write_session_structure_rows(rows.values(), paths["structure"])
+
+            write_session_name_overrides(
+                {
+                    source.session_code: "Source Override Before Swap",
+                    target.session_code: "Target Override Before Swap",
+                },
+                paths["session_names"],
+            )
+
+            result = transfer_session_content(
+                source_session_id=source.session_id,
+                target_session_id=target.session_id,
+                mode="swap",
+                session_structure_path=paths["structure"],
+                paper_placements_path=paths["placements"],
+                session_name_overrides_path=paths["session_names"],
+                source_effective_title="Source Effective Swap Title",
+                target_effective_title="Target Effective Swap Title",
+            )
+            self.assertTrue(result.get("ok", False))
+            self.assertEqual(int(result.get("moved_to_target", 0) or 0), 2)
+            self.assertEqual(int(result.get("moved_to_source", 0) or 0), 2)
+            self.assertEqual(int(result.get("unassigned_from_target", 0) or 0), 0)
+            self.assertEqual(int(result.get("capacity_updates", 0) or 0), 2)
+            self.assertGreaterEqual(int(result.get("title_updates", 0) or 0), 2)
+            self.assertEqual(list(result.get("warnings", []) or []), [])
+
+            placements_after = load_paper_placements(paths["placements"])
+            self.assertEqual(str(placements_after[sid_source_scheduled].get("SessionId", "")).strip(), target.session_id)
+            self.assertEqual(str(placements_after[sid_source_scheduled].get("PlacementStatus", "")).strip().lower(), "scheduled")
+            self.assertEqual(str(placements_after[sid_source_scheduled].get("TalkIndex", "")).strip(), "2")
+            self.assertEqual(str(placements_after[sid_source_overflow].get("SessionId", "")).strip(), target.session_id)
+            self.assertEqual(str(placements_after[sid_source_overflow].get("PlacementStatus", "")).strip().lower(), "overflow")
+            self.assertEqual(str(placements_after[sid_source_overflow].get("OverflowOrder", "")).strip(), "2")
+            self.assertEqual(str(placements_after[sid_target_scheduled].get("SessionId", "")).strip(), source.session_id)
+            self.assertEqual(str(placements_after[sid_target_scheduled].get("PlacementStatus", "")).strip().lower(), "scheduled")
+            self.assertEqual(str(placements_after[sid_target_scheduled].get("TalkIndex", "")).strip(), "3")
+            self.assertEqual(str(placements_after[sid_target_overflow].get("SessionId", "")).strip(), source.session_id)
+            self.assertEqual(str(placements_after[sid_target_overflow].get("PlacementStatus", "")).strip().lower(), "overflow")
+            self.assertEqual(str(placements_after[sid_target_overflow].get("OverflowOrder", "")).strip(), "1")
+
+            rows_after = load_session_structure_rows(paths["structure"])
+            self.assertEqual(str(rows_after[source.session_id].get("Capacity", "")).strip(), "3")
+            self.assertEqual(str(rows_after[target.session_id].get("Capacity", "")).strip(), "2")
+
+            overrides_after = load_session_name_overrides(paths["session_names"])
+            self.assertEqual(overrides_after.get(source.session_code, ""), "Target Effective Swap Title")
+            self.assertEqual(overrides_after.get(target.session_code, ""), "Source Effective Swap Title")
+
+    def test_transfer_session_content_invalid_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            state = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            self.assertTrue(state.all_sessions)
+            source_session_id = state.all_sessions[0].session_id
+
+            missing_ids = transfer_session_content(
+                source_session_id="",
+                target_session_id=source_session_id,
+                mode="replace",
+                session_structure_path=paths["structure"],
+                paper_placements_path=paths["placements"],
+                session_name_overrides_path=paths["session_names"],
+            )
+            self.assertFalse(missing_ids.get("ok", False))
+
+            same_ids = transfer_session_content(
+                source_session_id=source_session_id,
+                target_session_id=source_session_id,
+                mode="replace",
+                session_structure_path=paths["structure"],
+                paper_placements_path=paths["placements"],
+                session_name_overrides_path=paths["session_names"],
+            )
+            self.assertFalse(same_ids.get("ok", False))
+
+            unknown_target = transfer_session_content(
+                source_session_id=source_session_id,
+                target_session_id="missing-session-id",
+                mode="replace",
+                session_structure_path=paths["structure"],
+                paper_placements_path=paths["placements"],
+                session_name_overrides_path=paths["session_names"],
+            )
+            self.assertFalse(unknown_target.get("ok", False))
+
+            bad_mode = transfer_session_content(
+                source_session_id=source_session_id,
+                target_session_id=state.all_sessions[1].session_id if len(state.all_sessions) > 1 else "missing-session-id",
+                mode="invalid-mode",
+                session_structure_path=paths["structure"],
+                paper_placements_path=paths["placements"],
+                session_name_overrides_path=paths["session_names"],
+            )
+            self.assertFalse(bad_mode.get("ok", False))
 
     def test_clone_day_structure_skips_existing_slots_on_rerun(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

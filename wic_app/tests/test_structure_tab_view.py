@@ -271,6 +271,12 @@ class StructureTabViewTests(unittest.TestCase):
         self.assertIn('key="structure_show_advanced_tools"', app_text)
         self.assertIn("if not show_advanced_tools:", app_text)
         self.assertIn("with st.expander(\"Advanced table editor\", expanded=False):", app_text)
+        self.assertNotIn('"Hide inspector"', app_text)
+        self.assertNotIn('"Show inspector"', app_text)
+        self.assertIn('key="close_structure_inspector_btn"', structure_text)
+        self.assertIn('st.caption("Transfer Content")', app_text)
+        self.assertIn('scope_prefix="struct"', app_text)
+        self.assertIn('"Transfer mode"', app_text)
 
     def test_title_line_density_uses_two_lines_for_up_to_five_rooms(self) -> None:
         self.assertEqual(resolve_structure_title_lines(visible_room_columns=3), 2)

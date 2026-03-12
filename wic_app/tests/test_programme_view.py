@@ -45,6 +45,13 @@ class ProgrammeViewTests(unittest.TestCase):
         )
         self.assertEqual(capped_rooms, 3)
 
+    def test_programme_inspector_includes_transfer_content_controls(self) -> None:
+        app_text = (APP_ROOT / "app.py").read_text(encoding="utf-8")
+        self.assertIn('scope_prefix="prog"', app_text)
+        self.assertIn('"Transfer mode"', app_text)
+        self.assertIn('"Transfer session to..."', app_text)
+        self.assertIn("show_title=False", app_text)
+
 
 if __name__ == "__main__":
     unittest.main()

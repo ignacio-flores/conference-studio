@@ -14,6 +14,7 @@ from ui.papers import (  # noqa: E402
     build_paper_metadata_update_df,
     build_session_options,
     default_session_option_for_paper,
+    format_target_session_label,
     paper_public_row,
     presenter_with_abstract_html,
     title_link_html,
@@ -105,17 +106,60 @@ class PapersViewTests(unittest.TestCase):
     def test_session_options_rank_unassigned_active_inactive(self) -> None:
         state = SimpleNamespace(
             all_sessions=[
-                SimpleNamespace(session_id="I1", session_code="S-I1", status="inactive", day_label="Day 1", time="10h00-11h00", room="R2"),
-                SimpleNamespace(session_id="A2", session_code="S-A2", status="active", day_label="Day 1", time="11h00-12h00", room="R1"),
-                SimpleNamespace(session_id="A1", session_code="S-A1", status="active", day_label="Day 1", time="09h00-10h00", room="R1"),
+                SimpleNamespace(
+                    session_id="I1",
+                    session_code="S-I1",
+                    session_title="Inactive Session",
+                    status="inactive",
+                    day_label="Day 1",
+                    time="10h00-11h00",
+                    room="R2",
+                    capacity=2,
+                    papers=[None, None],
+                ),
+                SimpleNamespace(
+                    session_id="A2",
+                    session_code="S-A2",
+                    session_title="Active Session B",
+                    status="active",
+                    day_label="Day 1",
+                    time="11h00-12h00",
+                    room="R1",
+                    capacity=2,
+                    papers=[object(), object()],
+                ),
+                SimpleNamespace(
+                    session_id="A1",
+                    session_code="S-A1",
+                    session_title="Active Session A",
+                    status="active",
+                    day_label="Day 1",
+                    time="09h00-10h00",
+                    room="R1",
+                    capacity=3,
+                    papers=[object(), None, None],
+                ),
             ],
             papers=[],
         )
         options, labels = build_session_options(state)
         self.assertEqual(options[0], ("unassigned", ""))
-        self.assertIn("[active]", labels[options[1]])
-        self.assertIn("[active]", labels[options[2]])
-        self.assertIn("[inactive]", labels[options[3]])
+        self.assertEqual(labels[options[1]], "Active Session A | R1 | Day 1 | 09h00-10h00 | Slots 1/3")
+        self.assertEqual(labels[options[2]], "Active Session B | R1 | Day 1 | 11h00-12h00 | Slots 2/2")
+        self.assertEqual(labels[options[3]], "Inactive Session | R2 | Day 1 | 10h00-11h00 | Slots 0/2")
+
+    def test_target_session_label_falls_back_to_code_and_infers_capacity(self) -> None:
+        session = SimpleNamespace(
+            session_id="A1",
+            session_code="S-A1",
+            session_title="",
+            day_label="Day 1",
+            time="09h00-10h00",
+            room="R1",
+            papers=[object(), None, object()],
+        )
+        label = format_target_session_label(session)
+        self.assertEqual(label, "S-A1 | R1 | Day 1 | 09h00-10h00 | Slots 2/3")
 
     def test_default_session_option_uses_paper_session_id(self) -> None:
         state = SimpleNamespace(
