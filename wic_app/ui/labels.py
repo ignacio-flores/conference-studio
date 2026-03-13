@@ -174,6 +174,7 @@ def render_labels_tab(
     load_label_catalog_fn: Callable[[], Dict[str, List[str]]],
     write_label_catalog_fn: Callable[[Dict[str, Iterable[str]]], None],
     apply_classification_edits_if_changed: Callable[[pd.DataFrame], bool],
+    mobile_mode: bool = False,
 ) -> None:
     st.subheader("Labels")
 
@@ -195,22 +196,37 @@ def render_labels_tab(
         key=str.casefold,
     )
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Papers", len(papers_df))
-    m2.metric("Primary labels", len(set(catalog_primary) | set(paper_primary_values)))
-    m3.metric("Secondary labels", len(set(catalog_secondary) | set(paper_secondary_values)))
+    if mobile_mode:
+        st.metric("Papers", len(papers_df))
+        st.metric("Primary labels", len(set(catalog_primary) | set(paper_primary_values)))
+        st.metric("Secondary labels", len(set(catalog_secondary) | set(paper_secondary_values)))
+    else:
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Papers", len(papers_df))
+        m2.metric("Primary labels", len(set(catalog_primary) | set(paper_primary_values)))
+        m3.metric("Secondary labels", len(set(catalog_secondary) | set(paper_secondary_values)))
 
     with st.expander("Create labels", expanded=True):
         with st.form("labels_create_form", clear_on_submit=True):
-            create_col1, create_col2 = st.columns(2)
-            new_primary_raw = create_col1.text_input(
-                "New primary labels (comma, semicolon, or new-line separated)",
-                value="",
-            )
-            new_secondary_raw = create_col2.text_input(
-                "New secondary labels (comma, semicolon, or new-line separated)",
-                value="",
-            )
+            if mobile_mode:
+                new_primary_raw = st.text_input(
+                    "New primary labels (comma, semicolon, or new-line separated)",
+                    value="",
+                )
+                new_secondary_raw = st.text_input(
+                    "New secondary labels (comma, semicolon, or new-line separated)",
+                    value="",
+                )
+            else:
+                create_col1, create_col2 = st.columns(2)
+                new_primary_raw = create_col1.text_input(
+                    "New primary labels (comma, semicolon, or new-line separated)",
+                    value="",
+                )
+                new_secondary_raw = create_col2.text_input(
+                    "New secondary labels (comma, semicolon, or new-line separated)",
+                    value="",
+                )
             create_submit = st.form_submit_button("Add labels", use_container_width=True)
 
         if create_submit:

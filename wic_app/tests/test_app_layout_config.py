@@ -32,6 +32,15 @@ class AppLayoutConfigTests(unittest.TestCase):
         self.assertIn("pills_widget = getattr(st, \"pills\", None)", text)
         self.assertIn('elif active_tab == "Archived":', text)
         self.assertIn("render_archived_tab(", text)
+        self.assertIn("def _init_viewport_state()", text)
+        self.assertIn("MOBILE_QUERY_PARAM = \"mobile\"", text)
+        self.assertIn("APP_PASSWORD_SETTING = \"APP_PASSWORD\"", text)
+        self.assertIn("APP_REQUIRE_AUTH_SETTING = \"APP_REQUIRE_AUTH\"", text)
+        self.assertIn("def _enforce_access_gate()", text)
+        self.assertIn("def _resolve_auth_password() -> str:", text)
+        self.assertIn("def _env_setting(name: str) -> str:", text)
+        self.assertIn("def _secret_setting(name: str) -> str:", text)
+        self.assertIn("force_mobile_mode", text)
 
 
 if __name__ == "__main__":

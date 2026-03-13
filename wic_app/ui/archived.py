@@ -47,6 +47,7 @@ def render_archived_tab(
     state,
     archive_overrides: Dict[str, Dict[str, str]],
     restore_archived_paper: Callable[[str], bool],
+    mobile_mode: bool = False,
 ) -> None:
     st.subheader("Archived")
     archived_papers = list(getattr(state, "archived_papers", []) or [])
@@ -59,8 +60,11 @@ def render_archived_tab(
         for session in list(getattr(state, "all_sessions", []) or [])
     }
 
-    query_col, reason_col = st.columns([3.2, 1.4])
-    query = query_col.text_input("Search title/presenter/submission ID", "")
+    if mobile_mode:
+        query = st.text_input("Search title/presenter/submission ID", "")
+    else:
+        query_col, reason_col = st.columns([3.2, 1.4])
+        query = query_col.text_input("Search title/presenter/submission ID", "")
     reason_options = sorted(
         {
             _normalize_text(archive_overrides.get(_normalize_text(getattr(paper, "submission_id", "")), {}).get("ArchiveReason", "Other"))
@@ -68,7 +72,10 @@ def render_archived_tab(
             for paper in archived_papers
         }
     )
-    reason_filter = reason_col.selectbox("Reason", ["All"] + reason_options)
+    if mobile_mode:
+        reason_filter = st.selectbox("Reason", ["All"] + reason_options)
+    else:
+        reason_filter = reason_col.selectbox("Reason", ["All"] + reason_options)
 
     filtered: List[object] = []
     for paper in archived_papers:
@@ -115,16 +122,30 @@ def render_archived_tab(
         previous_placement = _previous_placement_label(row, sessions_by_id)
 
         with st.container(border=True):
-            row_cols = st.columns([3.8, 2.4, 1.2], gap="small")
-            row_cols[0].markdown(f"**{_normalize_text(getattr(paper, 'title', '')) or '[No title]'}**")
-            row_cols[0].caption(
-                f"{_normalize_text(getattr(paper, 'full_name', '')) or '[No presenter]'} | {sid}"
-            )
-            row_cols[1].caption(f"Reason: {reason}")
-            row_cols[1].caption(f"Archived at: {archived_at or '[unknown]'}")
-            row_cols[1].caption(f"Previous placement: {previous_placement}")
-            if note:
-                row_cols[1].caption(f"Note: {note}")
-            if row_cols[2].button("Restore", key=f"archived_restore_{sid}", use_container_width=True):
-                if restore_archived_paper(sid):
-                    st.rerun()
+            if mobile_mode:
+                st.markdown(f"**{_normalize_text(getattr(paper, 'title', '')) or '[No title]'}**")
+                st.caption(
+                    f"{_normalize_text(getattr(paper, 'full_name', '')) or '[No presenter]'} | {sid}"
+                )
+                st.caption(f"Reason: {reason}")
+                st.caption(f"Archived at: {archived_at or '[unknown]'}")
+                st.caption(f"Previous placement: {previous_placement}")
+                if note:
+                    st.caption(f"Note: {note}")
+                if st.button("Restore", key=f"archived_restore_{sid}", use_container_width=True):
+                    if restore_archived_paper(sid):
+                        st.rerun()
+            else:
+                row_cols = st.columns([3.8, 2.4, 1.2], gap="small")
+                row_cols[0].markdown(f"**{_normalize_text(getattr(paper, 'title', '')) or '[No title]'}**")
+                row_cols[0].caption(
+                    f"{_normalize_text(getattr(paper, 'full_name', '')) or '[No presenter]'} | {sid}"
+                )
+                row_cols[1].caption(f"Reason: {reason}")
+                row_cols[1].caption(f"Archived at: {archived_at or '[unknown]'}")
+                row_cols[1].caption(f"Previous placement: {previous_placement}")
+                if note:
+                    row_cols[1].caption(f"Note: {note}")
+                if row_cols[2].button("Restore", key=f"archived_restore_{sid}", use_container_width=True):
+                    if restore_archived_paper(sid):
+                        st.rerun()

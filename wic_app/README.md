@@ -39,6 +39,41 @@ python3 -m pip install -r wic_app/requirements.txt
 streamlit run wic_app/app.py
 ```
 
+### Phone access on the same network (LAN)
+
+Run Streamlit bound to all interfaces:
+
+```bash
+streamlit run wic_app/app.py --server.address 0.0.0.0 --server.port 8501
+```
+
+Then open `http://<host-machine-ip>:8501` from your phone on the same Wi-Fi/LAN.
+
+### Hosted deployment baseline
+
+Password gating is dormant by default. It is enabled only when
+`APP_REQUIRE_AUTH=true`.
+
+For internet-hosted usage, enable app-level password gating with env vars:
+
+```bash
+export APP_PASSWORD='change-this-password'
+export APP_REQUIRE_AUTH=true
+streamlit run wic_app/app.py --server.address 0.0.0.0 --server.port 8501
+```
+
+When auth is enabled, the app reads `APP_PASSWORD` from environment first, then
+falls back to Streamlit secrets.
+
+Optional `secrets.toml` example:
+
+```toml
+# .streamlit/secrets.toml
+APP_PASSWORD = "change-this-password"
+```
+
+You still need `APP_REQUIRE_AUTH=true` in the environment to activate the gate.
+
 ## Workflow
 
 1. Use **Programme** as the primary workspace:

@@ -1,44 +1,47 @@
 SessionCode,SessionTitleOverride,UpdatedAt
-D1-B1-R1-09,Automation,2026-03-12T17:19:24
-D1-B1-R1-10,D1-B1-R1-10,2026-03-12T17:19:24
-D1-B1-R2-01,Long run wealth in Europe,2026-03-12T17:19:24
-D1-B1-R2-20,Wage inequality,2026-03-12T17:19:24
-D1-B1-R2-21,Carbon Taxation,2026-03-12T17:19:24
-D1-B1-TBD-B,D1-B1-TBD-B,2026-03-12T17:19:24
-D1-B2-R1-09,Wage Bargaining,2026-03-12T17:19:24
-D1-B2-R1-10,Inequality Measurement (1),2026-03-12T17:19:24
-D1-B2-R2-01,LSE Session,2026-03-12T17:19:24
-D1-B2-R2-20,Preferences for redistribution,2026-03-12T17:19:24
-D1-B2-R2-21,Education and Human Capital,2026-03-12T17:19:24
-D1-B3-R1-09,Preferences for redistribution,2026-03-12T17:19:24
-D1-B3-R2-01,Momo's session,2026-03-12T17:19:24
-D1-B3-R2-20,Gender Inequality (1),2026-03-12T17:19:24
-D1-B3-R2-21,Tax Evasion/Elusion,2026-03-12T17:19:24
-D2-B1-R1-09,Intergenerational Mobility,2026-03-12T17:19:24
-D2-B1-R1-10,Tax Evasion/Elusion,2026-03-12T17:19:24
-D2-B1-R2-01,Gender Inequality (2),2026-03-12T17:19:24
-D2-B1-R2-21,Race and Caste,2026-03-12T17:19:24
-D2-B1-R3-71,Inequality Measurement (2),2026-03-12T17:19:24
-D2-B2-R1-09,Environmental Inequalities,2026-03-12T17:19:24
-D2-B2-R1-10,Inheritance,2026-03-12T17:19:24
-D2-B2-R2-01,Land inequality,2026-03-12T17:19:24
-D2-B2-R2-21,Distributional National Accounts,2026-03-12T17:19:24
-D2-B2-R3-71,Gender Inequality,2026-03-12T17:19:24
-D2-B3-R1-09,Sustainability,2026-03-12T17:19:24
-D2-B3-R1-10,Colonization,2026-03-12T17:19:24
-D2-B3-R2-01,Billionaire taxation,2026-03-12T17:19:24
-D2-B3-R2-21,Global inequalities,2026-03-12T17:19:24
-D2-B3-R3-71,Violence,2026-03-12T17:19:24
-D2-B4-R1-10,Philantropy,2026-03-12T17:19:24
-D2-B4-R2-01,Intergenerational Mobility (1),2026-03-12T17:19:24
-D2-B4-R2-21,Gender Inequality (3),2026-03-12T17:19:24
-D2-B4-R3-71,Consequences of Climate Change,2026-03-12T17:19:24
-D3-B1-R1-09,G,2026-03-12T17:19:24
-D3-B1-R1-10,Gender Inequality (4),2026-03-12T17:19:24
-D3-B1-R2-21,Spatial inequalities,2026-03-12T17:19:24
-D3-B1-R3-71,Political Inequality,2026-03-12T17:19:24
-D3-B2-R1-10,Pension wealth,2026-03-12T17:19:24
-D3-B2-R2-01,Taxation and Evasion/Elusion,2026-03-12T17:19:24
-D3-B2-R3-71,Inequality Perceptions,2026-03-12T17:19:24
-D3-B3-R1-09,Inflation,2026-03-12T17:19:24
-D3-B3-R2-01,Gender Inequality (5),2026-03-12T17:19:24
+D1-B1-R1-09,Taxing Wealth,2026-03-13T16:05:20
+D1-B1-R1-10,Political consequences,2026-03-13T16:05:20
+D1-B1-R2-01,Preferences for redistribution (1),2026-03-13T16:05:20
+D1-B1-R2-20,Gender gap,2026-03-13T16:05:20
+D1-B1-R2-21,Carbon Taxation,2026-03-13T16:05:20
+D1-B1-R3-71,Accumulation dynamics,2026-03-13T16:05:20
+D1-B1-TBD-B,D1-B1-TBD-B,2026-03-13T16:05:20
+D1-B2-R1-09,Preferences for redistribution (2),2026-03-13T16:05:20
+D1-B2-R1-10,Inequality Measurement (1),2026-03-13T16:05:20
+D1-B2-R2-01,LSE Session,2026-03-13T16:05:20
+D1-B2-R2-20,Tax Evasion/Elusion (1),2026-03-13T16:05:20
+D1-B2-R2-21,Education and Human Capital,2026-03-13T16:05:20
+D1-B2-R3-71,Carbon footprints,2026-03-13T16:05:20
+D1-B3-R1-09,Distributional National Accounts,2026-03-13T16:05:20
+D1-B3-R1-10,Tax Evasion/Elusion (2),2026-03-13T16:05:20
+D1-B3-R2-01,Working hours,2026-03-13T16:05:20
+D1-B3-R2-20,Political Inequality,2026-03-13T16:05:20
+D1-B3-R2-21,Intergenerational Mobility (1),2026-03-13T16:05:20
+D1-B3-R3-71,Housing and pensions,2026-03-13T16:05:20
+D2-B1-R1-09,Gender Inequality (1),2026-03-13T16:05:20
+D2-B1-R1-10,Global inequalities,2026-03-13T16:05:20
+D2-B1-R2-01,Inheritance,2026-03-13T16:05:20
+D2-B1-R2-21,Race and Caste,2026-03-13T16:05:20
+D2-B1-R3-71,Inequality Measurement (2),2026-03-13T16:05:20
+D2-B2-R1-09,Top Incomes,2026-03-13T16:05:20
+D2-B2-R1-10,Intergenerational Mobility (2),2026-03-13T16:05:20
+D2-B2-R2-01,Land inequality,2026-03-13T16:05:20
+D2-B2-R2-21,Consequences of Climate Change,2026-03-13T16:05:20
+D2-B2-R3-71,Public Spending,2026-03-13T16:05:20
+D2-B3-R1-09,Inequality Perceptions,2026-03-13T16:05:20
+D2-B3-R1-10,Measuring Inequality of Opportunity,2026-03-13T16:05:20
+D2-B3-R2-01,Billionaire taxation,2026-03-13T16:05:20
+D2-B3-R2-21,Wage inequality,2026-03-13T16:05:20
+D2-B3-R3-71,Gender Inequality (4),2026-03-13T16:05:20
+D2-B4-R1-09,Spatial Inequality,2026-03-13T16:05:20
+D2-B4-R2-01,Visions of Inequality,2026-03-13T16:05:20
+D2-B4-R2-21,Historical Wealth Series,2026-03-13T16:05:20
+D3-B1-R1-09,Intergenerational mobility (3),2026-03-13T16:05:20
+D3-B1-R1-10,Elite persistence,2026-03-13T16:05:20
+D3-B1-R2-01,Revisiting history,2026-03-13T16:05:20
+D3-B1-R2-21,Tax progressivity,2026-03-13T16:05:20
+D3-B1-R3-71,Preferences for Redistribution (3),2026-03-13T16:05:20
+D3-B2-R1-09,Migration,2026-03-13T16:05:20
+D3-B2-R2-01,Future Inequality,2026-03-13T16:05:20
+D3-B2-R2-21,Discrimination,2026-03-13T16:05:20
+D3-B3-R2-01,Perceptions,2026-03-13T16:05:20

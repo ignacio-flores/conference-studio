@@ -279,29 +279,30 @@ class StructureTabViewTests(unittest.TestCase):
         self.assertIn('"Transfer mode"', app_text)
         self.assertIn('f"Session papers ({counts[\'filled\']}/{counts[\'capacity\']} filled)"', app_text)
         self.assertIn("<div title='", app_text)
-        self.assertIn('st.caption("Overflow papers")', app_text)
+        self.assertIn('[!] (overflow #{overflow_idx})', app_text)
+        self.assertNotIn('st.caption("Overflow papers")', app_text)
         self.assertIn("def _session_hover_help(session: object) -> str:", structure_text)
         self.assertIn("help=_session_hover_help(session)", structure_text)
+        self.assertIn('[!] (overflow #{idx})', structure_text)
         self.assertNotIn("Abstract:", structure_text)
+        self.assertIn("def _render_structure_tab(state, mobile_mode: bool = False) -> None:", app_text)
+        self.assertIn("mobile_mode=mobile_mode", app_text)
+        self.assertIn("def _render_structure_matrix_mobile(", structure_text)
+        self.assertIn("mobile_mode: bool = False", structure_text)
+        self.assertIn("hidden on mobile screens", app_text)
 
     def test_structure_tab_clears_selection_on_filter_navigation_and_transfer(self) -> None:
         app_text = (APP_ROOT / "app.py").read_text(encoding="utf-8")
         self.assertIn("def _clear_structure_selection_for_navigation() -> None:", app_text)
         self.assertIn('if active_tab == "Structure":', app_text)
         self.assertGreaterEqual(app_text.count("on_change=_clear_structure_selection_for_navigation"), 6)
-        self.assertIn(
-            'if filter_col2.button(\n'
-            '        "Add/Delete days",\n'
-            '        key="structure_day_tools_toggle",',
-            app_text,
-        )
+        self.assertIn('if filter_col2.button(', app_text)
+        self.assertIn('"Add/Delete days"', app_text)
+        self.assertIn('key="structure_day_tools_toggle"', app_text)
         self.assertIn("        _clear_structure_selection_for_navigation()", app_text)
-        self.assertIn(
-            'if add_row_col1.button(\n'
-            '        "Add session",\n'
-            '        key=f"structure_add_row_toggle_{day_pick}",',
-            app_text,
-        )
+        self.assertIn('if add_row_col1.button(', app_text)
+        self.assertIn('"Add session"', app_text)
+        self.assertIn('key=f"structure_add_row_toggle_{day_pick}"', app_text)
         self.assertIn(
             "on_success_select_target=lambda _target_session_id: _clear_structure_selection()",
             app_text,

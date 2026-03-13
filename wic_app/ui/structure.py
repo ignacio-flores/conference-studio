@@ -76,13 +76,11 @@ def _session_hover_help(session: object) -> str:
 
     overflow_papers = list(getattr(session, "overflow_papers", []) or [])
     if overflow_papers:
-        lines.append("")
-        lines.append(f"Overflow: {len(overflow_papers)}")
         for idx, paper in enumerate(overflow_papers[:3], start=1):
             lines.append("")
             title = _normalize_text(getattr(paper, "title", "")) or "[No title]"
             presenter = _normalize_text(getattr(paper, "full_name", "")) or "[No presenter]"
-            lines.append(f'- Overflow {idx}: "{_clip_text(title, 88)}" - {_clip_text(presenter, 48)}')
+            lines.append(f'- [!] (overflow #{idx}) "{_clip_text(title, 88)}" - {_clip_text(presenter, 48)}')
         if len(overflow_papers) > 3:
             lines.append("")
             lines.append(f"... {len(overflow_papers) - 3} more overflow paper(s)")
@@ -271,6 +269,110 @@ def collect_visible_sessions(matrix: Dict[str, object]) -> List[object]:
     return visible
 
 
+def _render_structure_matrix_mobile(
+    *,
+    rows: List[Dict[str, object]],
+    rooms: List[str],
+    selection: Dict[str, object],
+    day_label: str,
+    on_select_session: Callable[[object], None],
+    on_select_room: Callable[[str], None],
+    on_select_empty_slot: Callable[[Dict[str, object], str], None],
+    on_select_new_room: Callable[[], None],
+) -> None:
+    selected_kind = _normalize_text(selection.get("kind", "") if isinstance(selection, dict) else "").lower()
+    selected_session_id = _normalize_text(selection.get("session_id", "") if isinstance(selection, dict) else "")
+    selected_room = _normalize_text(selection.get("room", "") if isinstance(selection, dict) else "")
+    selected_day = _normalize_text(selection.get("day_label", "") if isinstance(selection, dict) else "")
+    selected_block_num = int(selection.get("block_num", 0) or 0) if isinstance(selection, dict) else 0
+    selected_time_label = _normalize_text(selection.get("time_label", "") if isinstance(selection, dict) else "")
+    title_limit = 88
+
+    st.caption("Tap room/session cards to open the structure inspector.")
+    if st.button(
+        "Add room",
+        key=f"struct_room_new_mobile_{day_label}",
+        type="primary" if selected_kind == "new_room" and selected_day == day_label else "secondary",
+        use_container_width=True,
+        help="Add a new room column for this day.",
+    ):
+        on_select_new_room()
+        st.rerun()
+
+    for row in rows:
+        with st.container(border=True):
+            st.markdown(_format_block_time_cell(row), unsafe_allow_html=True)
+            for room in rooms:
+                session = row["sessions_by_room"].get(room)
+                room_is_selected = selected_kind == "room" and selected_day == day_label and selected_room == room
+                if st.button(
+                    f"Room: {room}",
+                    key=(
+                        f"struct_room_mobile_{day_label}_{int(row['block_num'])}_"
+                        f"{_normalize_text(row['time_label'])}_{room}"
+                    ),
+                    type="primary" if room_is_selected else "secondary",
+                    use_container_width=True,
+                ):
+                    on_select_room(room)
+                    st.rerun()
+
+                if session is None:
+                    empty_slot_selected = (
+                        selected_kind == "empty_slot"
+                        and selected_day == day_label
+                        and selected_room == room
+                        and selected_block_num == int(row["block_num"])
+                        and selected_time_label == _normalize_text(row["time_label"])
+                    )
+                    if st.button(
+                        "[Empty slot]",
+                        key=(
+                            f"struct_empty_mobile_{day_label}_{int(row['block_num'])}_"
+                            f"{_normalize_text(row['time_label'])}_{room}"
+                        ),
+                        type="primary" if empty_slot_selected else "secondary",
+                        use_container_width=True,
+                        help="Create a session in this empty room/block slot.",
+                    ):
+                        on_select_empty_slot(row, room)
+                        st.rerun()
+                    continue
+
+                with st.container(border=True):
+                    status_label = _status_value(session)
+                    status_color = _status_color(status_label)
+                    st.markdown(
+                        (
+                            "<div style='height:6px;border-radius:6px;"
+                            f"background:{status_color};margin-bottom:0.35rem;'></div>"
+                        ),
+                        unsafe_allow_html=True,
+                    )
+                    session_is_selected = (
+                        selected_kind == "session"
+                        and selected_session_id == _normalize_text(getattr(session, "session_id", ""))
+                    )
+                    session_title = _normalize_text(getattr(session, "session_title", "")) or "[No session title]"
+                    if st.button(
+                        _clip_text(session_title, title_limit),
+                        key=f"struct_session_mobile_{_normalize_text(getattr(session, 'session_id', ''))}",
+                        type="primary" if session_is_selected else "secondary",
+                        use_container_width=True,
+                        help=_session_hover_help(session),
+                    ):
+                        on_select_session(session)
+                        st.rerun()
+                    counts = structure_session_counts(session)
+                    used = counts["used"]
+                    capacity = counts["capacity"]
+                    occ_color = _occupancy_color(used, capacity)
+                    st.markdown(
+                        f"<div style='font-size:0.88rem;font-weight:700;color:{occ_color};'>{used}/{capacity}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+
 def render_structure_matrix(
     matrix: Dict[str, object],
     selection: Dict[str, object],
@@ -279,11 +381,25 @@ def render_structure_matrix(
     on_select_room: Callable[[str], None],
     on_select_empty_slot: Callable[[Dict[str, object], str], None],
     on_select_new_room: Callable[[], None],
+    mobile_mode: bool = False,
 ) -> None:
     rows = matrix.get("rows", []) if isinstance(matrix, dict) else []
     rooms = matrix.get("rooms", []) if isinstance(matrix, dict) else []
     if not rows:
         st.info("No sessions found for the current filters.")
+        return
+
+    if mobile_mode:
+        _render_structure_matrix_mobile(
+            rows=rows,
+            rooms=rooms,
+            selection=selection,
+            day_label=day_label,
+            on_select_session=on_select_session,
+            on_select_room=on_select_room,
+            on_select_empty_slot=on_select_empty_slot,
+            on_select_new_room=on_select_new_room,
+        )
         return
 
     st.caption("Click a room header or session card to open the structure inspector.")

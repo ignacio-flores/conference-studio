@@ -262,6 +262,166 @@ def _render_paper_list_infinite_scroll(token: str, enabled: bool) -> str:
     return _normalize_text(value)
 
 
+def _render_paper_details_panel(
+    *,
+    state,
+    row: Dict[str, object],
+    sid: str,
+    theme_order: List[str],
+    session_options: List[Tuple[str, str]],
+    session_labels: Dict[Tuple[str, str], str],
+    edit_key: str,
+    detail_key: str,
+    apply_classification_edits_if_changed: Callable[[pd.DataFrame], bool],
+    apply_paper_metadata_edits_if_changed: Callable[[pd.DataFrame], bool],
+    apply_paper_session_selection_edit: Callable[[str, Tuple[str, str]], bool],
+    apply_archive_paper: Callable[[str, str, str], bool],
+    mobile_mode: bool,
+) -> None:
+    is_editing = _normalize_text(st.session_state.get(edit_key, "")) == sid
+    st.caption("Abstract")
+    abstract = _clean_text(row.get("Abstract", "")) or "No abstract provided."
+    st.write(abstract)
+
+    more_details_label = "Hide more details" if is_editing else "More details"
+    if st.button(
+        more_details_label,
+        key=f"paper_row_more_details_{sid}",
+        use_container_width=False,
+    ):
+        if is_editing:
+            st.session_state[edit_key] = ""
+        else:
+            st.session_state[detail_key] = sid
+            st.session_state[edit_key] = sid
+        st.rerun()
+
+    if not is_editing:
+        return
+
+    st.caption("Edit Paper")
+    if mobile_mode:
+        new_author = st.text_input(
+            "Author",
+            value=_normalize_text(row.get("FullName", "")),
+            key=f"paper_edit_author_{sid}",
+        )
+        new_title = st.text_input(
+            "Title",
+            value=_normalize_text(row.get("Title", "")),
+            key=f"paper_edit_title_{sid}",
+        )
+    else:
+        e_meta_1, e_meta_2 = st.columns([2, 3], gap="small")
+        new_author = e_meta_1.text_input(
+            "Author",
+            value=_normalize_text(row.get("FullName", "")),
+            key=f"paper_edit_author_{sid}",
+        )
+        new_title = e_meta_2.text_input(
+            "Title",
+            value=_normalize_text(row.get("Title", "")),
+            key=f"paper_edit_title_{sid}",
+        )
+
+    session_key = f"paper_edit_session_target_{sid}"
+    session_src = f"{session_key}_src"
+    default_session_target = default_session_option_for_paper(state, sid, session_options)
+    if st.session_state.get(session_src) != default_session_target:
+        st.session_state[session_key] = default_session_target
+        st.session_state[session_src] = default_session_target
+    new_session_target = st.selectbox(
+        "Target Session",
+        options=session_options,
+        key=session_key,
+        format_func=lambda option: session_labels.get(option, "Unassigned"),
+        help="Unassigned first, then active sessions, then inactive sessions.",
+    )
+
+    st.caption("Classification")
+    theme_options = [""]
+    for candidate in list(theme_order):
+        cleaned = _normalize_text(candidate)
+        if cleaned and cleaned not in theme_options:
+            theme_options.append(cleaned)
+    current_theme = _normalize_text(row.get("PrimaryTheme", ""))
+    if current_theme and current_theme not in theme_options:
+        theme_options = [current_theme] + theme_options
+    theme_index = theme_options.index(current_theme) if current_theme in theme_options else 0
+    if mobile_mode:
+        new_theme = st.selectbox(
+            "PrimaryTheme",
+            options=theme_options,
+            index=theme_index,
+            format_func=lambda value: value or "[No label]",
+            key=f"paper_edit_theme_{sid}",
+        )
+        new_subtheme = st.text_input(
+            "Subtheme",
+            value=_normalize_text(row.get("Subtheme", "")),
+            key=f"paper_edit_subtheme_{sid}",
+        )
+    else:
+        e1, e2 = st.columns([2, 3], gap="small")
+        new_theme = e1.selectbox(
+            "PrimaryTheme",
+            options=theme_options,
+            index=theme_index,
+            format_func=lambda value: value or "[No label]",
+            key=f"paper_edit_theme_{sid}",
+        )
+        new_subtheme = e2.text_input(
+            "Subtheme",
+            value=_normalize_text(row.get("Subtheme", "")),
+            key=f"paper_edit_subtheme_{sid}",
+        )
+    new_notes = st.text_area(
+        "Notes",
+        value=_normalize_text(row.get("OverrideNotes", "")),
+        height=90,
+        key=f"paper_edit_notes_{sid}",
+    )
+    st.caption("Archive")
+    archive_reason = st.selectbox(
+        "Archive reason",
+        ARCHIVE_REASON_OPTIONS,
+        key=f"paper_edit_archive_reason_{sid}",
+    )
+    archive_note = st.text_area(
+        "Archive note (optional)",
+        key=f"paper_edit_archive_note_{sid}",
+        height=70,
+    )
+    if st.button("Archive Paper", key=f"paper_edit_archive_{sid}", use_container_width=True):
+        if apply_archive_paper(sid, archive_reason, archive_note):
+            st.session_state[edit_key] = ""
+            st.session_state[detail_key] = ""
+            st.rerun()
+    save_col, cancel_col = st.columns(2)
+    if save_col.button("Save", key=f"paper_edit_save_{sid}", use_container_width=True):
+        classification_row = build_classification_update_df(
+            submission_id=sid,
+            primary_theme=new_theme,
+            subtheme=new_subtheme,
+            override_notes=new_notes,
+        )
+        metadata_row = build_paper_metadata_update_df(
+            submission_id=sid,
+            title=new_title,
+            full_name=new_author,
+        )
+        class_changed = apply_classification_edits_if_changed(classification_row)
+        metadata_changed = apply_paper_metadata_edits_if_changed(metadata_row)
+        session_changed = apply_paper_session_selection_edit(sid, new_session_target)
+        if class_changed or metadata_changed or session_changed:
+            st.session_state[edit_key] = ""
+            st.rerun()
+        st.info("No paper changes detected.")
+    if cancel_col.button("Cancel", key=f"paper_edit_cancel_{sid}", use_container_width=True):
+        st.session_state[edit_key] = ""
+        st.rerun()
+
+
 def render_paper_list_tab(
     state,
     edited_ids: Iterable[str],
@@ -271,6 +431,7 @@ def render_paper_list_tab(
     apply_paper_metadata_edits_if_changed: Callable[[pd.DataFrame], bool],
     apply_paper_session_selection_edit: Callable[[str, Tuple[str, str]], bool],
     apply_archive_paper: Callable[[str, str, str], bool],
+    mobile_mode: bool = False,
 ) -> None:
     st.subheader("Paper List")
     edited_ids_set = set(edited_ids)
@@ -279,14 +440,24 @@ def render_paper_list_tab(
         st.info("No papers available.")
         return
 
-    f1, f2, f3, f4, f5, f6 = st.columns([2, 2, 2, 2, 2, 3])
-    theme_filter = f1.selectbox("Theme", ["All"] + sorted(papers_df["PrimaryTheme"].dropna().unique().tolist()))
-    subtheme_filter = f2.selectbox("Subtheme", ["All"] + sorted(papers_df["Subtheme"].dropna().unique().tolist()))
-    day_filter = f3.selectbox("Day", ["All"] + sorted(papers_df["Day"].dropna().unique().tolist()))
-    block_filter = f4.selectbox("Block", ["All"] + sorted(papers_df["Block"].dropna().unique().tolist()))
-    room_filter = f5.selectbox("Room", ["All"] + sorted(papers_df["Room"].dropna().unique().tolist()))
-    query = f6.text_input("Search title/presenter", "")
-    show_not_edited_only = st.checkbox("Show not-edited papers only", value=False)
+    if mobile_mode:
+        with st.expander("Filters", expanded=True):
+            theme_filter = st.selectbox("Theme", ["All"] + sorted(papers_df["PrimaryTheme"].dropna().unique().tolist()))
+            subtheme_filter = st.selectbox("Subtheme", ["All"] + sorted(papers_df["Subtheme"].dropna().unique().tolist()))
+            day_filter = st.selectbox("Day", ["All"] + sorted(papers_df["Day"].dropna().unique().tolist()))
+            block_filter = st.selectbox("Block", ["All"] + sorted(papers_df["Block"].dropna().unique().tolist()))
+            room_filter = st.selectbox("Room", ["All"] + sorted(papers_df["Room"].dropna().unique().tolist()))
+            query = st.text_input("Search title/presenter", "")
+            show_not_edited_only = st.checkbox("Show not-edited papers only", value=False)
+    else:
+        f1, f2, f3, f4, f5, f6 = st.columns([2, 2, 2, 2, 2, 3])
+        theme_filter = f1.selectbox("Theme", ["All"] + sorted(papers_df["PrimaryTheme"].dropna().unique().tolist()))
+        subtheme_filter = f2.selectbox("Subtheme", ["All"] + sorted(papers_df["Subtheme"].dropna().unique().tolist()))
+        day_filter = f3.selectbox("Day", ["All"] + sorted(papers_df["Day"].dropna().unique().tolist()))
+        block_filter = f4.selectbox("Block", ["All"] + sorted(papers_df["Block"].dropna().unique().tolist()))
+        room_filter = f5.selectbox("Room", ["All"] + sorted(papers_df["Room"].dropna().unique().tolist()))
+        query = f6.text_input("Search title/presenter", "")
+        show_not_edited_only = st.checkbox("Show not-edited papers only", value=False)
 
     filtered = _filtered_papers(
         papers_df=papers_df,
@@ -304,6 +475,8 @@ def render_paper_list_tab(
         return
 
     filtered = filtered.sort_values(by=["Day", "Block", "Room", "SessionCode", "FullName"], kind="stable").reset_index(drop=True)
+    all_filtered_rows = filtered.to_dict(orient="records")
+    rows_by_sid = {_normalize_text(row.get("SubmissionID", "")): row for row in all_filtered_rows}
 
     page_key = "paper_list_loaded_pages"
     page_signature_key = "paper_list_page_signature"
@@ -363,13 +536,14 @@ def render_paper_list_tab(
         f"Showing {page_end} of {total_rows} paper(s) · Loaded pages {loaded_pages}/{total_pages}"
     )
 
-    header_cols = st.columns([2.2, 3.2, 1.8, 1.2, 2.0, 0.8], gap="small")
-    header_cols[0].markdown("**Presenter**")
-    header_cols[1].markdown("**Title**")
-    header_cols[2].markdown("**Theme**")
-    header_cols[3].markdown("**Session**")
-    header_cols[4].markdown("**Placement**")
-    header_cols[5].markdown("**Details**")
+    if not mobile_mode:
+        header_cols = st.columns([2.2, 3.2, 1.8, 1.2, 2.0, 0.8], gap="small")
+        header_cols[0].markdown("**Presenter**")
+        header_cols[1].markdown("**Title**")
+        header_cols[2].markdown("**Theme**")
+        header_cols[3].markdown("**Session**")
+        header_cols[4].markdown("**Placement**")
+        header_cols[5].markdown("**Details**")
 
     for row in filtered_page.to_dict(orient="records"):
         sid = _normalize_text(row.get("SubmissionID", ""))
@@ -378,12 +552,45 @@ def render_paper_list_tab(
         public_row = paper_public_row(row)
         is_details_open = detail_sid == sid
         is_editing = edit_sid == sid
+        placement = format_paper_placement_label(paper_by_id.get(sid), sessions_by_id)
+
+        if mobile_mode:
+            with st.container(border=True):
+                st.markdown(public_row["TitleHTML"], unsafe_allow_html=True)
+                st.caption(_clean_text(row.get("FullName", "")) or "[No presenter]")
+                st.caption(_clip_text(f"{public_row['Theme']} | {public_row['Subtheme']}", 84) or "[No theme]")
+                st.caption(f"Session: {_clip_text(public_row['Session'] or '[Unassigned]', 42)}")
+                st.caption(f"Placement: {_clip_text(placement, 84)}")
+                action_col1, action_col2 = st.columns(2)
+                details_label = "Hide" if is_details_open else "Details"
+                if action_col1.button(
+                    details_label,
+                    key=f"paper_row_details_{sid}",
+                    use_container_width=True,
+                ):
+                    if is_details_open:
+                        st.session_state[detail_key] = ""
+                        if is_editing:
+                            st.session_state[edit_key] = ""
+                    else:
+                        st.session_state[detail_key] = sid
+                        st.session_state[edit_key] = ""
+                    st.rerun()
+                if action_col2.button(
+                    "Edit",
+                    key=f"paper_row_edit_{sid}",
+                    use_container_width=True,
+                ):
+                    st.session_state[detail_key] = sid
+                    st.session_state[edit_key] = sid
+                    st.rerun()
+            continue
+
         row_cols = st.columns([2.2, 3.2, 1.8, 1.2, 2.0, 0.8], gap="small")
         row_cols[0].markdown(public_row["PresenterHTML"], unsafe_allow_html=True)
         row_cols[1].markdown(public_row["TitleHTML"], unsafe_allow_html=True)
         row_cols[2].caption(_clip_text(f"{public_row['Theme']} | {public_row['Subtheme']}", 62) or "[No theme]")
         row_cols[3].caption(_clip_text(public_row["Session"] or "[Unassigned]", 24))
-        placement = format_paper_placement_label(paper_by_id.get(sid), sessions_by_id)
         row_cols[4].caption(_clip_text(placement, 86))
         details_label = "Hide" if is_details_open else "Details"
         if row_cols[5].button(
@@ -402,123 +609,49 @@ def render_paper_list_tab(
 
         if not (is_details_open or is_editing):
             continue
-
         with st.container(border=True):
-            st.caption("Abstract")
-            abstract = _clean_text(row.get("Abstract", "")) or "No abstract provided."
-            st.write(abstract)
-
-            more_details_label = "Hide more details" if is_editing else "More details"
-            if st.button(
-                more_details_label,
-                key=f"paper_row_more_details_{sid}",
-                use_container_width=False,
-            ):
-                if is_editing:
-                    st.session_state[edit_key] = ""
-                else:
-                    st.session_state[detail_key] = sid
-                    st.session_state[edit_key] = sid
-                st.rerun()
-
-            if not is_editing:
-                continue
-
-            st.caption("Edit Paper")
-
-            e_meta_1, e_meta_2 = st.columns([2, 3], gap="small")
-            new_author = e_meta_1.text_input(
-                "Author",
-                value=_normalize_text(row.get("FullName", "")),
-                key=f"paper_edit_author_{sid}",
-            )
-            new_title = e_meta_2.text_input(
-                "Title",
-                value=_normalize_text(row.get("Title", "")),
-                key=f"paper_edit_title_{sid}",
-            )
-            session_key = f"paper_edit_session_target_{sid}"
-            session_src = f"{session_key}_src"
-            default_session_target = default_session_option_for_paper(state, sid, session_options)
-            if st.session_state.get(session_src) != default_session_target:
-                st.session_state[session_key] = default_session_target
-                st.session_state[session_src] = default_session_target
-            new_session_target = st.selectbox(
-                "Target Session",
-                options=session_options,
-                key=session_key,
-                format_func=lambda option: session_labels.get(option, "Unassigned"),
-                help="Unassigned first, then active sessions, then inactive sessions.",
+            _render_paper_details_panel(
+                state=state,
+                row=row,
+                sid=sid,
+                theme_order=theme_order,
+                session_options=session_options,
+                session_labels=session_labels,
+                edit_key=edit_key,
+                detail_key=detail_key,
+                apply_classification_edits_if_changed=apply_classification_edits_if_changed,
+                apply_paper_metadata_edits_if_changed=apply_paper_metadata_edits_if_changed,
+                apply_paper_session_selection_edit=apply_paper_session_selection_edit,
+                apply_archive_paper=apply_archive_paper,
+                mobile_mode=False,
             )
 
-            st.caption("Classification")
-            theme_options = [""]
-            for candidate in list(theme_order):
-                cleaned = _normalize_text(candidate)
-                if cleaned and cleaned not in theme_options:
-                    theme_options.append(cleaned)
-            current_theme = _normalize_text(row.get("PrimaryTheme", ""))
-            if current_theme and current_theme not in theme_options:
-                theme_options = [current_theme] + theme_options
-            theme_index = theme_options.index(current_theme) if current_theme in theme_options else 0
-            e1, e2 = st.columns([2, 3], gap="small")
-            new_theme = e1.selectbox(
-                "PrimaryTheme",
-                options=theme_options,
-                index=theme_index,
-                format_func=lambda value: value or "[No label]",
-                key=f"paper_edit_theme_{sid}",
+    if mobile_mode and detail_sid:
+        selected_row = rows_by_sid.get(detail_sid)
+        if selected_row is None:
+            st.session_state[detail_key] = ""
+            st.session_state[edit_key] = ""
+            st.rerun()
+
+        @st.dialog("Paper details", width="large")
+        def _open_mobile_paper_details_dialog() -> None:
+            _render_paper_details_panel(
+                state=state,
+                row=selected_row,
+                sid=detail_sid,
+                theme_order=theme_order,
+                session_options=session_options,
+                session_labels=session_labels,
+                edit_key=edit_key,
+                detail_key=detail_key,
+                apply_classification_edits_if_changed=apply_classification_edits_if_changed,
+                apply_paper_metadata_edits_if_changed=apply_paper_metadata_edits_if_changed,
+                apply_paper_session_selection_edit=apply_paper_session_selection_edit,
+                apply_archive_paper=apply_archive_paper,
+                mobile_mode=True,
             )
-            new_subtheme = e2.text_input(
-                "Subtheme",
-                value=_normalize_text(row.get("Subtheme", "")),
-                key=f"paper_edit_subtheme_{sid}",
-            )
-            new_notes = st.text_area(
-                "Notes",
-                value=_normalize_text(row.get("OverrideNotes", "")),
-                height=90,
-                key=f"paper_edit_notes_{sid}",
-            )
-            st.caption("Archive")
-            archive_reason = st.selectbox(
-                "Archive reason",
-                ARCHIVE_REASON_OPTIONS,
-                key=f"paper_edit_archive_reason_{sid}",
-            )
-            archive_note = st.text_area(
-                "Archive note (optional)",
-                key=f"paper_edit_archive_note_{sid}",
-                height=70,
-            )
-            if st.button("Archive Paper", key=f"paper_edit_archive_{sid}", use_container_width=True):
-                if apply_archive_paper(sid, archive_reason, archive_note):
-                    st.session_state[edit_key] = ""
-                    st.session_state[detail_key] = ""
-                    st.rerun()
-            save_col, cancel_col = st.columns(2)
-            if save_col.button("Save", key=f"paper_edit_save_{sid}", use_container_width=True):
-                classification_row = build_classification_update_df(
-                    submission_id=sid,
-                    primary_theme=new_theme,
-                    subtheme=new_subtheme,
-                    override_notes=new_notes,
-                )
-                metadata_row = build_paper_metadata_update_df(
-                    submission_id=sid,
-                    title=new_title,
-                    full_name=new_author,
-                )
-                class_changed = apply_classification_edits_if_changed(classification_row)
-                metadata_changed = apply_paper_metadata_edits_if_changed(metadata_row)
-                session_changed = apply_paper_session_selection_edit(sid, new_session_target)
-                if class_changed or metadata_changed or session_changed:
-                    st.session_state[edit_key] = ""
-                    st.rerun()
-                st.info("No paper changes detected.")
-            if cancel_col.button("Cancel", key=f"paper_edit_cancel_{sid}", use_container_width=True):
-                st.session_state[edit_key] = ""
-                st.rerun()
+
+        _open_mobile_paper_details_dialog()
 
     has_more_pages = loaded_pages < total_pages
     if has_more_pages:

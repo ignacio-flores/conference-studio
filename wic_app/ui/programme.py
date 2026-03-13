@@ -40,6 +40,8 @@ def render_programme_tab(
     get_block_sessions: Callable,
     render_programme_block_grid: Callable,
     render_programme_inspector: Callable,
+    mobile_mode: bool = False,
+    open_mobile_inspector_dialog: Callable[[], None] | None = None,
 ) -> None:
     st.subheader("Programme")
 
@@ -58,19 +60,40 @@ def render_programme_tab(
         return
 
     block_labels = ["All blocks"] + [row["Label"] for row in block_rows]
-    c1, c2 = st.columns([2.8, 3.6])
-    with c1:
-        selected_block_label = st.selectbox(
-            "Block (optional)",
-            block_labels,
-            key=f"programme_block_filter_{day_pick}",
-        )
-    with c2:
-        columns_choice = st.selectbox(
-            "Columns per row",
-            PROGRAMME_COLUMN_OPTIONS,
-            key="programme_columns_per_row",
-        )
+    if mobile_mode:
+        with st.expander("Programme filters", expanded=True):
+            selected_block_label = st.selectbox(
+                "Block (optional)",
+                block_labels,
+                key=f"programme_block_filter_{day_pick}",
+            )
+            compare_mode = st.toggle(
+                "Compare multiple rooms",
+                value=False,
+                key="programme_mobile_compare",
+                help="Off = stacked one-room cards. On = multi-room rows.",
+            )
+            columns_choice = st.selectbox(
+                "Columns per row",
+                PROGRAMME_COLUMN_OPTIONS,
+                key="programme_columns_per_row",
+                disabled=not compare_mode,
+            )
+    else:
+        c1, c2 = st.columns([2.8, 3.6])
+        with c1:
+            selected_block_label = st.selectbox(
+                "Block (optional)",
+                block_labels,
+                key=f"programme_block_filter_{day_pick}",
+            )
+        with c2:
+            columns_choice = st.selectbox(
+                "Columns per row",
+                PROGRAMME_COLUMN_OPTIONS,
+                key="programme_columns_per_row",
+            )
+        compare_mode = True
 
     selection = st.session_state.get("programme_selection", {})
     has_selection = isinstance(selection, dict) and bool(selection.get("session_id"))
@@ -97,11 +120,42 @@ def render_programme_tab(
         )
         max_rooms = max(max_rooms, room_count)
 
-    rooms_per_row, column_width = resolve_programme_layout_density(
-        max_rooms=max_rooms,
-        has_selection=has_selection,
-        columns_choice=columns_choice,
-    )
+    room_filter_options: List[str] = []
+    for block in candidate_blocks:
+        block_sessions = get_block_sessions(
+            state,
+            day_pick,
+            block["BlockNum"],
+            block["Time"],
+            block["Block"],
+        )
+        room_filter_options.extend([str(getattr(session, "room", "")).strip() for session in block_sessions])
+    room_filter_options = sorted({room for room in room_filter_options if room})
+
+    selected_rooms = room_filter_options
+    if mobile_mode and room_filter_options:
+        selected_rooms = st.multiselect(
+            "Room filter (optional)",
+            options=room_filter_options,
+            default=room_filter_options,
+            key=f"programme_mobile_room_filter_{day_pick}",
+            help="Unselect rooms to simplify the mobile grid.",
+        )
+        if not selected_rooms:
+            st.info("Showing all rooms because no room is selected.")
+            selected_rooms = room_filter_options
+
+    if mobile_mode and not compare_mode:
+        rooms_per_row = 1
+        column_width = 360
+    else:
+        rooms_per_row, column_width = resolve_programme_layout_density(
+            max_rooms=max_rooms,
+            has_selection=has_selection,
+            columns_choice=columns_choice,
+        )
+        if mobile_mode:
+            rooms_per_row = min(2, rooms_per_row)
 
     def _render_grid_content() -> None:
         st.caption("Click a session card or slot block to open the inspector.")
@@ -114,13 +168,18 @@ def render_programme_tab(
                 block["Time"],
                 block["Block"],
             )
+            if selected_rooms:
+                selected_room_set = set(selected_rooms)
+                block_sessions = [
+                    session for session in block_sessions if str(getattr(session, "room", "")).strip() in selected_room_set
+                ]
             render_programme_block_grid(
                 block_sessions,
                 column_width_px=column_width,
                 rooms_per_row=rooms_per_row,
             )
 
-    if has_selection:
+    if has_selection and not mobile_mode:
         left_col, right_col = st.columns([3.2, 1.2], gap="large")
         with left_col:
             _render_grid_content()
@@ -129,3 +188,7 @@ def render_programme_tab(
             render_programme_inspector(state)
     else:
         _render_grid_content()
+        if has_selection and mobile_mode:
+            st.caption("Selection active. Inspector opens in a dialog on mobile.")
+            if callable(open_mobile_inspector_dialog):
+                open_mobile_inspector_dialog()

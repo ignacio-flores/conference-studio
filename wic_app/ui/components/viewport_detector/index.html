@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      (function () {
+        const state = {
+          lastSentWidth: null,
+          resizeTimer: null,
+        };
+
+        function postMessage(type, payload) {
+          const message = Object.assign(
+            {
+              isStreamlitMessage: true,
+              type: type,
+            },
+            payload || {}
+          );
+          window.parent.postMessage(message, "*");
+        }
+
+        function setFrameHeight() {
+          postMessage("streamlit:setFrameHeight", { height: 0 });
+        }
+
+        function resolveWidth() {
+          const fallback =
+            document.documentElement.clientWidth ||
+            document.body.clientWidth ||
+            0;
+          return Math.max(0, Math.floor(window.innerWidth || fallback));
+        }
+
+        function sendWidth() {
+          const width = resolveWidth();
+          if (width <= 0 || width === state.lastSentWidth) {
+            return;
+          }
+          state.lastSentWidth = width;
+          postMessage("streamlit:setComponentValue", { value: width });
+        }
+
+        function scheduleSendWidth() {
+          if (state.resizeTimer) {
+            window.clearTimeout(state.resizeTimer);
+          }
+          state.resizeTimer = window.setTimeout(sendWidth, 120);
+        }
+
+        function onRender(event) {
+          const data = event.data;
+          if (!data || data.type !== "streamlit:render") {
+            return;
+          }
+          state.lastSentWidth = null;
+          sendWidth();
+          setFrameHeight();
+        }
+
+        window.addEventListener("message", onRender);
+        window.addEventListener("resize", scheduleSendWidth);
+        postMessage("streamlit:componentReady", { apiVersion: 1 });
+        sendWidth();
+        setFrameHeight();
+      })();
+    </script>
+  </body>
+</html>

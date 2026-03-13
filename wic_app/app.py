@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hmac
 import html
 import json
 import os
@@ -10,6 +11,7 @@ from typing import Callable, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from engine.config import load_conference_config
 from exporters.publish import export_draft_workbook, export_publish_excel, export_publish_pdf
@@ -68,6 +70,12 @@ from ui.inspector_layout import inject_sticky_inspector_css
 from ui.labels import render_labels_tab
 from ui.papers import format_target_session_label, render_paper_list_tab
 from ui.programme import render_programme_tab as render_programme_tab_view
+from ui.responsive import (
+    DEFAULT_VIEWPORT_WIDTH,
+    parse_bool_setting,
+    parse_mobile_override,
+    resolve_viewport_mode,
+)
 from ui.structure import (
     block_filter_labels_for_day,
     build_empty_slot_selection,
@@ -97,11 +105,24 @@ UNDO_STACK_LIMIT = 20
 DEFAULT_CONFERENCE_LABEL = "WIC 2026"
 UI_SETTINGS_FILE = Path(__file__).resolve().parent / "state" / "ui_settings.json"
 ARCHIVE_REASON_OPTIONS = ["Duplicate submission", "Author cancelled attendance", "Other"]
+OVERFLOW_TEXT_COLOR = "#8a6d00"
+VIEWPORT_DETECTOR_COMPONENT_DIR = (
+    Path(__file__).resolve().parent / "ui" / "components" / "viewport_detector"
+)
+MOBILE_QUERY_PARAM = "mobile"
+APP_PASSWORD_SETTING = "APP_PASSWORD"
+APP_REQUIRE_AUTH_SETTING = "APP_REQUIRE_AUTH"
+
+viewport_detector_component = components.declare_component(
+    "wic_viewport_detector",
+    path=str(VIEWPORT_DETECTOR_COMPONENT_DIR),
+)
 
 
 st.set_page_config(page_title=APP_TITLE, layout="wide")
-st.markdown(
-    """
+def _inject_global_css() -> None:
+    st.markdown(
+        """
 <style>
 div.stButton > button[kind="primary"] {
     background-color: #e6f2ff !important;
@@ -115,10 +136,30 @@ div.stButton > button[kind="primary"]:hover {
 div.stButton > button[kind="primary"]:focus {
     box-shadow: 0 0 0 0.2rem rgba(70, 140, 220, 0.25) !important;
 }
+[data-testid="stAppViewContainer"] {
+    overflow-x: hidden;
+}
+@media (max-width: 767px) {
+    [data-testid="block-container"] {
+        padding-left: 0.7rem !important;
+        padding-right: 0.7rem !important;
+    }
+    div.stButton > button,
+    div.stDownloadButton > button,
+    div[data-testid="stFormSubmitButton"] > button {
+        min-height: 2.5rem;
+    }
+    [data-testid="stHorizontalBlock"] {
+        gap: 0.45rem;
+    }
+}
 </style>
 """,
-    unsafe_allow_html=True,
-)
+        unsafe_allow_html=True,
+    )
+
+
+_inject_global_css()
 inject_sticky_inspector_css()
 
 
@@ -147,6 +188,124 @@ def _preview_abstract(value: object) -> str:
     if match:
         clean = clean[: match.start()]
     return clean.strip()
+
+
+def _env_setting(name: str) -> str:
+    return _normalize_text(os.environ.get(name, ""))
+
+
+def _secret_setting(name: str) -> str:
+    value = None
+    try:
+        if hasattr(st.secrets, "get"):
+            value = st.secrets.get(name)
+        elif name in st.secrets:
+            value = st.secrets[name]
+    except Exception:
+        value = None
+    return _normalize_text(value)
+
+
+def _query_param_value(name: str) -> str:
+    query_params = getattr(st, "query_params", None)
+    if query_params is not None:
+        try:
+            value = query_params.get(name)
+            if isinstance(value, list):
+                return _normalize_text(value[0] if value else "")
+            return _normalize_text(value)
+        except Exception:
+            pass
+    get_query_params = getattr(st, "experimental_get_query_params", None)
+    if callable(get_query_params):
+        try:
+            payload = get_query_params()
+            value = payload.get(name, "")
+            if isinstance(value, list):
+                return _normalize_text(value[0] if value else "")
+            return _normalize_text(value)
+        except Exception:
+            return ""
+    return ""
+
+
+def _init_viewport_state() -> None:
+    if "viewport_width" not in st.session_state:
+        st.session_state.viewport_width = DEFAULT_VIEWPORT_WIDTH
+    if "viewport_tier" not in st.session_state:
+        st.session_state.viewport_tier = "desktop"
+    if "mobile_mode" not in st.session_state:
+        st.session_state.mobile_mode = False
+    if "force_mobile_mode" not in st.session_state:
+        st.session_state.force_mobile_mode = None
+
+    override = parse_mobile_override(_query_param_value(MOBILE_QUERY_PARAM))
+    st.session_state.force_mobile_mode = override
+    current_width = st.session_state.get("viewport_width", DEFAULT_VIEWPORT_WIDTH)
+    measured_width = viewport_detector_component(
+        default=int(current_width),
+        key="wic_viewport_detector",
+    )
+    try:
+        viewport_width = max(1, int(measured_width))
+    except Exception:
+        viewport_width = int(current_width)
+    st.session_state.viewport_width = viewport_width
+    viewport_tier, mobile_mode = resolve_viewport_mode(
+        viewport_width=viewport_width,
+        force_mobile_mode=override,
+    )
+    st.session_state.viewport_tier = viewport_tier
+    st.session_state.mobile_mode = mobile_mode
+
+
+def _access_gate_required() -> bool:
+    require_raw = _env_setting(APP_REQUIRE_AUTH_SETTING)
+    if not require_raw:
+        return False
+    return parse_bool_setting(require_raw, default=False)
+
+
+def _resolve_auth_password() -> str:
+    configured_password = _env_setting(APP_PASSWORD_SETTING)
+    if configured_password:
+        return configured_password
+    return _secret_setting(APP_PASSWORD_SETTING)
+
+
+def _enforce_access_gate() -> None:
+    if "app_access_unlocked" not in st.session_state:
+        st.session_state.app_access_unlocked = False
+
+    if not _access_gate_required():
+        st.session_state.app_access_unlocked = True
+        return
+
+    configured_password = _resolve_auth_password()
+    if not configured_password:
+        st.error("APP_REQUIRE_AUTH is enabled but APP_PASSWORD is missing.")
+        st.stop()
+
+    if st.session_state.get("app_access_unlocked", False):
+        return
+
+    st.title("Conference Studio")
+    st.caption("Password required for hosted/mobile access.")
+    with st.form("app_access_gate_form", clear_on_submit=False):
+        entered_password = st.text_input(
+            "Password",
+            type="password",
+            key="app_access_password_input",
+        )
+        submitted = st.form_submit_button("Unlock", use_container_width=True)
+
+    if submitted:
+        if hmac.compare_digest(_normalize_text(entered_password), configured_password):
+            st.session_state.app_access_unlocked = True
+            st.session_state.app_access_password_input = ""
+            st.rerun()
+        st.error("Incorrect password.")
+    st.stop()
 
 
 def _app_config_path() -> Optional[Path]:
@@ -228,6 +387,16 @@ def _init_session_state() -> None:
         st.session_state.conference_label_draft = legacy_input or st.session_state.conference_label
     if "conference_edit_mode" not in st.session_state:
         st.session_state.conference_edit_mode = False
+    if "viewport_width" not in st.session_state:
+        st.session_state.viewport_width = DEFAULT_VIEWPORT_WIDTH
+    if "viewport_tier" not in st.session_state:
+        st.session_state.viewport_tier = "desktop"
+    if "mobile_mode" not in st.session_state:
+        st.session_state.mobile_mode = False
+    if "force_mobile_mode" not in st.session_state:
+        st.session_state.force_mobile_mode = None
+    if "app_access_unlocked" not in st.session_state:
+        st.session_state.app_access_unlocked = False
     if not saved_label:
         _save_conference_label(st.session_state.conference_label)
 
@@ -1233,17 +1402,19 @@ def _render_structure_session_inspector(state, session: object) -> None:
                 unsafe_allow_html=True,
             )
 
-        if session.overflow_papers:
-            st.caption("Overflow papers")
-            for overflow_idx, paper in enumerate(session.overflow_papers, start=1):
-                presenter = _clean_display_text(getattr(paper, "full_name", "")) or "[No presenter]"
-                title = _clean_display_text(getattr(paper, "title", "")) or "[No title]"
-                abstract_preview = _preview_abstract(getattr(paper, "abstract", "")) or "No abstract provided."
-                line = _clip_text(f'Overflow {overflow_idx}: "{title}" - {presenter}', 126)
-                st.markdown(
-                    f"<div title='{html.escape(abstract_preview)}'>{html.escape(line)}</div>",
-                    unsafe_allow_html=True,
-                )
+        for overflow_idx, paper in enumerate(list(getattr(session, "overflow_papers", []) or []), start=1):
+            presenter = _clean_display_text(getattr(paper, "full_name", "")) or "[No presenter]"
+            title = _clean_display_text(getattr(paper, "title", "")) or "[No title]"
+            abstract_preview = _preview_abstract(getattr(paper, "abstract", "")) or "No abstract provided."
+            line = _clip_text(f'[!] (overflow #{overflow_idx}) "{title}" - {presenter}', 126)
+            st.markdown(
+                (
+                    f"<div title='{html.escape(abstract_preview)}' "
+                    f"style='color:{OVERFLOW_TEXT_COLOR};font-weight:600;'>"
+                    f"{html.escape(line)}</div>"
+                ),
+                unsafe_allow_html=True,
+            )
 
     st.markdown("---")
     st.caption("Structure")
@@ -1782,7 +1953,7 @@ def _render_structure_new_room_inspector(state, selection: Dict[str, object]) ->
         st.error(str(result.get("error", "Failed to add room sessions.")))
 
 
-def _render_structure_tab(state) -> None:
+def _render_structure_tab(state, mobile_mode: bool = False) -> None:
     st.subheader("Structure")
     config = load_conference_config(_app_config_path())
     all_sessions = sorted(state.all_sessions, key=_session_sort_key)
@@ -1793,36 +1964,69 @@ def _render_structure_tab(state) -> None:
     if not day_options:
         day_options = ["Day 1"]
 
-    filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.7, 0.9, 2.1, 1.2, 2.1])
-    day_pick = filter_col1.selectbox(
-        "Day",
-        day_options,
-        key="structure_day_filter",
-        on_change=_clear_structure_selection_for_navigation,
-    )
-    filter_col2.caption("Manage days")
-    if filter_col2.button(
-        "Add/Delete days",
-        key="structure_day_tools_toggle",
-        use_container_width=True,
-        help="Open day operations for clone, clear, delete, or relabel.",
-    ):
-        _clear_structure_selection_for_navigation()
-        st.session_state.structure_day_tools_open = not bool(st.session_state.get("structure_day_tools_open", False))
-        st.rerun()
-    status_pick = filter_col4.selectbox(
-        "Status",
-        options=["all", "active", "inactive"],
-        format_func=lambda value: value.title(),
-        key="structure_status_filter",
-        on_change=_clear_structure_selection_for_navigation,
-    )
-    search_text = filter_col5.text_input(
-        "Search SessionTitle/SessionCode/Room",
-        "",
-        key="structure_search",
-        on_change=_clear_structure_selection_for_navigation,
-    )
+    if mobile_mode:
+        with st.expander("Filters", expanded=True):
+            day_pick = st.selectbox(
+                "Day",
+                day_options,
+                key="structure_day_filter",
+                on_change=_clear_structure_selection_for_navigation,
+            )
+            if st.button(
+                "Add/Delete days",
+                key="structure_day_tools_toggle",
+                use_container_width=True,
+                help="Open day operations for clone, clear, delete, or relabel.",
+            ):
+                _clear_structure_selection_for_navigation()
+                st.session_state.structure_day_tools_open = not bool(
+                    st.session_state.get("structure_day_tools_open", False)
+                )
+                st.rerun()
+            status_pick = st.selectbox(
+                "Status",
+                options=["all", "active", "inactive"],
+                format_func=lambda value: value.title(),
+                key="structure_status_filter",
+                on_change=_clear_structure_selection_for_navigation,
+            )
+            search_text = st.text_input(
+                "Search SessionTitle/SessionCode/Room",
+                "",
+                key="structure_search",
+                on_change=_clear_structure_selection_for_navigation,
+            )
+    else:
+        filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.7, 0.9, 2.1, 1.2, 2.1])
+        day_pick = filter_col1.selectbox(
+            "Day",
+            day_options,
+            key="structure_day_filter",
+            on_change=_clear_structure_selection_for_navigation,
+        )
+        filter_col2.caption("Manage days")
+        if filter_col2.button(
+            "Add/Delete days",
+            key="structure_day_tools_toggle",
+            use_container_width=True,
+            help="Open day operations for clone, clear, delete, or relabel.",
+        ):
+            _clear_structure_selection_for_navigation()
+            st.session_state.structure_day_tools_open = not bool(st.session_state.get("structure_day_tools_open", False))
+            st.rerun()
+        status_pick = filter_col4.selectbox(
+            "Status",
+            options=["all", "active", "inactive"],
+            format_func=lambda value: value.title(),
+            key="structure_status_filter",
+            on_change=_clear_structure_selection_for_navigation,
+        )
+        search_text = filter_col5.text_input(
+            "Search SessionTitle/SessionCode/Room",
+            "",
+            key="structure_search",
+            on_change=_clear_structure_selection_for_navigation,
+        )
     block_options = block_filter_labels_for_day(
         all_sessions,
         day_label=day_pick,
@@ -1835,13 +2039,22 @@ def _render_structure_tab(state) -> None:
         st.session_state.structure_block_filter = block_options[0]
         current_block = block_options[0]
     block_index = block_options.index(current_block) if current_block in block_options else 0
-    block_pick = filter_col3.selectbox(
-        "Block (optional)",
-        options=block_options,
-        index=block_index,
-        key="structure_block_filter",
-        on_change=_clear_structure_selection_for_navigation,
-    )
+    if mobile_mode:
+        block_pick = st.selectbox(
+            "Block (optional)",
+            options=block_options,
+            index=block_index,
+            key="structure_block_filter",
+            on_change=_clear_structure_selection_for_navigation,
+        )
+    else:
+        block_pick = filter_col3.selectbox(
+            "Block (optional)",
+            options=block_options,
+            index=block_index,
+            key="structure_block_filter",
+            on_change=_clear_structure_selection_for_navigation,
+        )
 
     day_sessions = [session for session in all_sessions if _normalize_text(session.day_label) == day_pick]
     day_rooms = sorted(
@@ -2023,11 +2236,19 @@ def _render_structure_tab(state) -> None:
     visible_inactive = len(visible_sessions) - visible_active
     visible_open_slots = sum(structure_session_counts(session)["open_slots"] for session in visible_sessions)
     visible_overflow = sum(structure_session_counts(session)["overflow"] for session in visible_sessions)
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Visible active sessions", visible_active)
-    c2.metric("Visible inactive sessions", visible_inactive)
-    c3.metric("Visible open slots", visible_open_slots)
-    c4.metric("Visible overflow papers", visible_overflow)
+    if mobile_mode:
+        c1, c2 = st.columns(2)
+        c1.metric("Visible active sessions", visible_active)
+        c2.metric("Visible inactive sessions", visible_inactive)
+        c3, c4 = st.columns(2)
+        c3.metric("Visible open slots", visible_open_slots)
+        c4.metric("Visible overflow papers", visible_overflow)
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Visible active sessions", visible_active)
+        c2.metric("Visible inactive sessions", visible_inactive)
+        c3.metric("Visible open slots", visible_open_slots)
+        c4.metric("Visible overflow papers", visible_overflow)
     def _on_select_session(session: object) -> None:
         _set_structure_selection(build_session_selection(session))
 
@@ -2066,14 +2287,25 @@ def _render_structure_tab(state) -> None:
         if not selected_room_defaults:
             selected_room_defaults = list(all_rooms)
 
-        selected_rooms = st.multiselect(
-            "Room filter (optional)",
-            options=all_rooms,
-            default=selected_room_defaults,
-            key="structure_selected_rooms",
-            help="All rooms are visible by default. Unselect rooms to simplify the view.",
-            on_change=_clear_structure_selection_for_navigation,
-        )
+        if mobile_mode:
+            with st.expander("Room filter", expanded=False):
+                selected_rooms = st.multiselect(
+                    "Room filter (optional)",
+                    options=all_rooms,
+                    default=selected_room_defaults,
+                    key="structure_selected_rooms",
+                    help="All rooms are visible by default. Unselect rooms to simplify the view.",
+                    on_change=_clear_structure_selection_for_navigation,
+                )
+        else:
+            selected_rooms = st.multiselect(
+                "Room filter (optional)",
+                options=all_rooms,
+                default=selected_room_defaults,
+                key="structure_selected_rooms",
+                help="All rooms are visible by default. Unselect rooms to simplify the view.",
+                on_change=_clear_structure_selection_for_navigation,
+            )
         if not selected_rooms:
             st.info("Showing all rooms because no room is selected in the filter.")
             selected_rooms = list(all_rooms)
@@ -2101,6 +2333,7 @@ def _render_structure_tab(state) -> None:
             on_select_room=_on_select_room,
             on_select_empty_slot=_on_select_empty_slot,
             on_select_new_room=_on_select_new_room,
+            mobile_mode=mobile_mode,
         )
 
     _render_matrix()
@@ -2134,17 +2367,29 @@ def _render_structure_tab(state) -> None:
         _open_structure_inspector_dialog()
 
     st.markdown("---")
-    add_row_col1, add_row_col2 = st.columns([1.1, 3.9])
-    if add_row_col1.button(
-        "Add session",
-        key=f"structure_add_row_toggle_{day_pick}",
-        use_container_width=True,
-        help="Append a new full row of sessions for all rooms in the selected day.",
-    ):
-        _clear_structure_selection_for_navigation()
-        st.session_state.structure_add_row_open = not bool(st.session_state.get("structure_add_row_open", False))
-        st.rerun()
-    add_row_col2.caption("Append one new block row across every room in this day.")
+    if mobile_mode:
+        if st.button(
+            "Add session",
+            key=f"structure_add_row_toggle_{day_pick}",
+            use_container_width=True,
+            help="Append a new full row of sessions for all rooms in the selected day.",
+        ):
+            _clear_structure_selection_for_navigation()
+            st.session_state.structure_add_row_open = not bool(st.session_state.get("structure_add_row_open", False))
+            st.rerun()
+        st.caption("Append one new block row across every room in this day.")
+    else:
+        add_row_col1, add_row_col2 = st.columns([1.1, 3.9])
+        if add_row_col1.button(
+            "Add session",
+            key=f"structure_add_row_toggle_{day_pick}",
+            use_container_width=True,
+            help="Append a new full row of sessions for all rooms in the selected day.",
+        ):
+            _clear_structure_selection_for_navigation()
+            st.session_state.structure_add_row_open = not bool(st.session_state.get("structure_add_row_open", False))
+            st.rerun()
+        add_row_col2.caption("Append one new block row across every room in this day.")
 
     if bool(st.session_state.get("structure_add_row_open", False)):
         with st.container(border=True):
@@ -2254,6 +2499,9 @@ def _render_structure_tab(state) -> None:
         on_change=_clear_structure_selection_for_navigation,
     )
     if not show_advanced_tools:
+        return
+    if mobile_mode:
+        st.info("Advanced structure tools are desktop-recommended and hidden on mobile screens.")
         return
 
     session_rows = list(load_session_structure_rows(SESSION_STRUCTURE_FILE).values())
@@ -2660,11 +2908,17 @@ def _candidate_sort_key(paper: object) -> tuple:
     )
 
 
-def _set_programme_selection(kind: str, session_id: str, talk_index: int = 0) -> None:
+def _set_programme_selection(
+    kind: str,
+    session_id: str,
+    talk_index: int = 0,
+    overflow_order: int = 0,
+) -> None:
     st.session_state.programme_selection = {
         "kind": kind,
         "session_id": session_id,
         "talk_index": int(talk_index),
+        "overflow_order": int(overflow_order),
     }
 
 
@@ -2699,10 +2953,12 @@ def _render_programme_block_grid(
     selected_kind = ""
     selected_session_id = ""
     selected_talk_index = 0
+    selected_overflow_order = 0
     if isinstance(selection, dict):
         selected_kind = _normalize_text(selection.get("kind", "")).lower()
         selected_session_id = _normalize_text(selection.get("session_id", ""))
         selected_talk_index = int(selection.get("talk_index", 0) or 0)
+        selected_overflow_order = int(selection.get("overflow_order", 0) or 0)
 
     for start_idx in range(0, len(rooms), row_size):
         row_rooms = rooms[start_idx : start_idx + row_size]
@@ -2761,8 +3017,39 @@ def _render_programme_block_grid(
                             _set_programme_selection("slot", session.session_id, talk_idx)
                             st.rerun()
 
-                    if session.overflow_papers:
-                        st.error(f"Overflow: {len(session.overflow_papers)}")
+                    for overflow_order, overflow_paper in enumerate(list(getattr(session, "overflow_papers", []) or []), start=1):
+                        overflow_is_selected = (
+                            selected_kind == "overflow"
+                            and selected_session_id == session.session_id
+                            and selected_overflow_order == overflow_order
+                        )
+                        st.markdown(
+                            (
+                                "<div style='font-size:0.82rem;"
+                                f"color:{OVERFLOW_TEXT_COLOR};font-weight:600;'>"
+                                f"[!] (overflow #{overflow_order})"
+                                "</div>"
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        presenter = _clip_text(overflow_paper.full_name, presenter_limit)
+                        title = _clip_text(overflow_paper.title, slot_title_limit + 36)
+                        abstract_preview = _preview_abstract(overflow_paper.abstract)
+                        overflow_button_label = f"\"{title}\"\n({presenter}) [!] (overflow #{overflow_order})"
+                        if st.button(
+                            overflow_button_label,
+                            key=f"select_overflow_{session.session_id}_{overflow_order}",
+                            type="primary" if overflow_is_selected else "secondary",
+                            use_container_width=True,
+                            help=abstract_preview,
+                        ):
+                            _set_programme_selection(
+                                "overflow",
+                                session.session_id,
+                                0,
+                                overflow_order,
+                            )
+                            st.rerun()
 
 
 def _on_inspector_paper_fields_change(submission_id: str) -> None:
@@ -2805,8 +3092,20 @@ def _render_paper_slot_inspector(
     talk_index: int,
     paper: object,
     all_sessions: List[object],
+    overflow_order: int = 0,
 ) -> None:
-    st.caption(f"Paper - Slot {talk_index} - Session {session.session_code}")
+    if overflow_order > 0:
+        st.markdown(
+            (
+                "<div style='font-size:0.9rem;"
+                f"color:{OVERFLOW_TEXT_COLOR};'>"
+                f"Paper - [!] (overflow #{overflow_order}) - Session {html.escape(session.session_code)}"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+    else:
+        st.caption(f"Paper - Slot {talk_index} - Session {session.session_code}")
     title = _clean_display_text(paper.title) or "[No paper title]"
     pdf_url = _normalize_text(paper.link_to_pdf)
     if pdf_url.startswith("http"):
@@ -3096,6 +3395,24 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
             ):
                 _set_programme_selection("slot", session.session_id, talk_idx)
                 st.rerun()
+        for overflow_order, overflow_paper in enumerate(list(getattr(session, "overflow_papers", []) or []), start=1):
+            presenter = _clip_text(_clean_display_text(overflow_paper.full_name) or "[No presenter]", 52)
+            st.markdown(
+                (
+                    "<div style='font-size:0.82rem;"
+                    f"color:{OVERFLOW_TEXT_COLOR};font-weight:600;'>"
+                    f"[!] (overflow #{overflow_order})"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                f"[!] (overflow #{overflow_order}) {presenter}",
+                key=f"ins_open_overflow_{session.session_id}_{overflow_order}",
+                use_container_width=True,
+            ):
+                _set_programme_selection("overflow", session.session_id, 0, overflow_order)
+                st.rerun()
 
     action_col1, action_col2 = st.columns(2)
     clear_pending_key = f"ins_confirm_clear_pending_{session.session_id}"
@@ -3179,97 +3496,6 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
         show_title=False,
     )
 
-    overflow_count = len(session.overflow_papers)
-    with st.expander(f"Overflow papers ({overflow_count})", expanded=False):
-        if not session.overflow_papers:
-            st.info("No overflow papers in this session.")
-            return
-
-        for overflow_pos, paper in enumerate(session.overflow_papers, start=1):
-            with st.expander(f"Overflow {overflow_pos}: {paper.submission_id} | {_clip_text(paper.title, 62)}", expanded=False):
-                presenter = _clean_display_text(paper.full_name)
-                title = _clean_display_text(paper.title)
-                abstract_preview = _preview_abstract(paper.abstract)
-                pdf_url = _normalize_text(paper.link_to_pdf)
-                if pdf_url.startswith("http"):
-                    st.markdown(
-                        f"<b>{html.escape(presenter)}</b><br>"
-                        f"<a href='{html.escape(pdf_url)}' target='_blank' rel='noopener noreferrer' "
-                        f"title='{html.escape(abstract_preview)}'>{html.escape(title)}</a>",
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.markdown(
-                        f"<b>{html.escape(presenter)}</b><br>"
-                        f"<span title='{html.escape(abstract_preview)}'>{html.escape(title)}</span>",
-                        unsafe_allow_html=True,
-                    )
-
-                session_ids = [s.session_id for s in all_sessions]
-                default_idx = session_ids.index(session.session_id) if session.session_id in session_ids else 0
-                target_session_id = st.selectbox(
-                    "Target Session",
-                    session_ids,
-                    index=default_idx,
-                    key=f"ins_ov_target_session_{paper.submission_id}_{session.session_id}_{overflow_pos}",
-                    format_func=lambda session_id: next(
-                        (
-                            format_target_session_label(s)
-                            for s in all_sessions
-                            if s.session_id == session_id
-                        ),
-                        session_id,
-                    ),
-                )
-                target_session = next((s for s in all_sessions if s.session_id == target_session_id), None)
-                target_capacity = max(1, int(getattr(target_session, "capacity", 1) if target_session is not None else 1))
-                target_slot = st.selectbox(
-                    "Target Slot",
-                    list(range(1, target_capacity + 1)),
-                    index=0,
-                    key=f"ins_ov_target_slot_{paper.submission_id}_{session.session_id}_{overflow_pos}",
-                )
-                if st.button(
-                    "Move Overflow Paper",
-                    key=f"ins_ov_move_{paper.submission_id}_{session.session_id}_{overflow_pos}",
-                    use_container_width=True,
-                ):
-                    target_label = format_target_session_label(target_session) if target_session is not None else "the selected session"
-                    if _apply_layout_updates(
-                        {
-                            paper.submission_id: {
-                                "PlacementStatus": "scheduled",
-                                "SessionId": target_session_id,
-                                "TalkIndex": str(target_slot),
-                                "OverflowOrder": "",
-                            }
-                        },
-                        f"Moved {_paper_move_label(paper)} to {target_label} (slot {target_slot}).",
-                    ):
-                        st.rerun()
-                if st.button(
-                    "Drop Overflow To Unassigned",
-                    key=f"ins_ov_drop_{paper.submission_id}_{session.session_id}_{overflow_pos}",
-                    use_container_width=True,
-                ):
-                    if _apply_layout_updates(
-                        {
-                            paper.submission_id: {
-                                "PlacementStatus": "unassigned",
-                                "SessionId": "",
-                                "TalkIndex": "",
-                                "OverflowOrder": "",
-                            }
-                        },
-                        f"Moved {_paper_move_label(paper)} to unassigned.",
-                    ):
-                        st.rerun()
-                if _render_archive_controls(
-                    paper,
-                    scope_prefix=f"ins_ov_{session.session_id}_{overflow_pos}",
-                ):
-                    st.rerun()
-
 
 def _render_programme_inspector(state) -> None:
     _, head2 = st.columns([4, 1])
@@ -3300,6 +3526,22 @@ def _render_programme_inspector(state) -> None:
         c2.metric("Overflow", overflow_count)
         return
 
+    if kind == "overflow":
+        overflow_order = int(selection.get("overflow_order", 0) or 0)
+        if overflow_order < 1 or overflow_order > len(session.overflow_papers):
+            st.warning("Invalid overflow selection. Pick an overflow paper again.")
+            return
+        paper = session.overflow_papers[overflow_order - 1]
+        _render_paper_slot_inspector(
+            state,
+            session,
+            0,
+            paper,
+            all_sessions,
+            overflow_order=overflow_order,
+        )
+        return
+
     talk_index = int(selection.get("talk_index", 0) or 0)
     if talk_index < 1 or talk_index > len(session.papers):
         st.warning("Invalid slot selection. Pick a slot again.")
@@ -3312,14 +3554,20 @@ def _render_programme_inspector(state) -> None:
         _render_paper_slot_inspector(state, session, talk_index, paper, all_sessions)
 
 
+_init_viewport_state()
+_enforce_access_gate()
 _init_session_state()
 state = st.session_state.wic_state
 edited_ids = set(getattr(state, "edited_submission_ids", set()))
 edited_count = len([p for p in state.papers if p.submission_id in edited_ids])
 not_edited_count = len(state.papers) - edited_count
+mobile_mode = bool(st.session_state.get("mobile_mode", False))
+force_mobile_mode = st.session_state.get("force_mobile_mode")
+if force_mobile_mode is not None:
+    forced_label = "on" if bool(force_mobile_mode) else "off"
+    st.caption(f"Mobile mode override is {forced_label} from query parameter `?mobile=`.")
 
-title_col, edit_col = st.columns([8.6, 0.6], gap="small")
-with title_col:
+if mobile_mode:
     st.markdown(
         (
             "<h1 style='margin:0;text-align:left;'>"
@@ -3329,11 +3577,31 @@ with title_col:
         ),
         unsafe_allow_html=True,
     )
-with edit_col:
-    if st.button("✎", key="conference_title_edit_toggle", help="Edit conference name."):
+    if st.button(
+        "Edit conference name",
+        key="conference_title_edit_toggle",
+        use_container_width=True,
+    ):
         st.session_state.conference_edit_mode = True
         st.session_state.conference_label_draft = st.session_state.conference_label
         st.rerun()
+else:
+    title_col, edit_col = st.columns([8.6, 0.6], gap="small")
+    with title_col:
+        st.markdown(
+            (
+                "<h1 style='margin:0;text-align:left;'>"
+                "Conference Studio"
+                f"<span style='color:#5f6f86;font-weight:600;'>&nbsp;&middot;&nbsp;{html.escape(st.session_state.conference_label)}</span>"
+                "</h1>"
+            ),
+            unsafe_allow_html=True,
+        )
+    with edit_col:
+        if st.button("✎", key="conference_title_edit_toggle", help="Edit conference name."):
+            st.session_state.conference_edit_mode = True
+            st.session_state.conference_label_draft = st.session_state.conference_label
+            st.rerun()
 
 if st.session_state.get("conference_edit_mode", False):
     st.text_input(
@@ -3342,7 +3610,10 @@ if st.session_state.get("conference_edit_mode", False):
         label_visibility="collapsed",
         placeholder="Conference name",
     )
-    edit_save_col, edit_cancel_col = st.columns([1.2, 1.2], gap="small")
+    if mobile_mode:
+        edit_save_col, edit_cancel_col = st.columns(2, gap="small")
+    else:
+        edit_save_col, edit_cancel_col = st.columns([1.2, 1.2], gap="small")
     if edit_save_col.button("Save conference name", use_container_width=True, key="conference_name_save"):
         _save_conference_label(st.session_state.get("conference_label_draft", ""))
         st.session_state.conference_edit_mode = False
@@ -3355,8 +3626,7 @@ if st.session_state.flash_message:
     st.success(st.session_state.flash_message)
     st.session_state.flash_message = ""
 
-nav_col, actions_col = st.columns([5.2, 1.8], gap="small")
-with nav_col:
+if mobile_mode:
     pills_widget = getattr(st, "pills", None)
     if callable(pills_widget):
         try:
@@ -3378,10 +3648,9 @@ with nav_col:
             "Navigation",
             TAB_LABELS,
             key="active_tab",
-            horizontal=True,
+            horizontal=False,
             label_visibility="collapsed",
         )
-with actions_col:
     render_top_actions(
         state=state,
         not_edited_count=not_edited_count,
@@ -3392,11 +3661,55 @@ with actions_col:
         export_publish_pdf=export_publish_pdf,
         export_draft_workbook=export_draft_workbook,
     )
+else:
+    nav_col, actions_col = st.columns([5.2, 1.8], gap="small")
+    with nav_col:
+        pills_widget = getattr(st, "pills", None)
+        if callable(pills_widget):
+            try:
+                pills_widget(
+                    "Navigation",
+                    TAB_LABELS,
+                    key="active_tab",
+                    selection_mode="single",
+                    label_visibility="collapsed",
+                )
+            except TypeError:
+                pills_widget(
+                    "Navigation",
+                    TAB_LABELS,
+                    key="active_tab",
+                )
+        else:
+            st.radio(
+                "Navigation",
+                TAB_LABELS,
+                key="active_tab",
+                horizontal=True,
+                label_visibility="collapsed",
+            )
+    with actions_col:
+        render_top_actions(
+            state=state,
+            not_edited_count=not_edited_count,
+            undo_count=_undo_count(),
+            undo_last_change=_undo_last_change,
+            refresh_state=_refresh_state,
+            export_publish_excel=export_publish_excel,
+            export_publish_pdf=export_publish_pdf,
+            export_draft_workbook=export_draft_workbook,
+        )
 
 active_tab = _normalize_text(st.session_state.get("active_tab", TAB_LABELS[0]))
 if active_tab not in TAB_LABELS:
     active_tab = TAB_LABELS[0]
     st.session_state.active_tab = active_tab
+
+
+@st.dialog("Programme inspector", width="large")
+def _open_programme_inspector_dialog() -> None:
+    _render_programme_inspector(state)
+
 
 if active_tab == "Programme":
     render_programme_tab_view(
@@ -3406,9 +3719,11 @@ if active_tab == "Programme":
         get_block_sessions=_get_block_sessions,
         render_programme_block_grid=_render_programme_block_grid,
         render_programme_inspector=_render_programme_inspector,
+        mobile_mode=mobile_mode,
+        open_mobile_inspector_dialog=_open_programme_inspector_dialog,
     )
 elif active_tab == "Structure":
-    _render_structure_tab(state)
+    _render_structure_tab(state, mobile_mode=mobile_mode)
 elif active_tab == "Paper List":
     render_paper_list_tab(
         state=state,
@@ -3419,12 +3734,14 @@ elif active_tab == "Paper List":
         apply_paper_metadata_edits_if_changed=_apply_paper_metadata_edits_if_changed,
         apply_paper_session_selection_edit=_apply_paper_session_selection_edit,
         apply_archive_paper=_archive_paper,
+        mobile_mode=mobile_mode,
     )
 elif active_tab == "Archived":
     render_archived_tab(
         state=state,
         archive_overrides=load_paper_archive_overrides(PAPER_ARCHIVE_OVERRIDES_FILE),
         restore_archived_paper=_restore_archived_paper,
+        mobile_mode=mobile_mode,
     )
 elif active_tab == "Labels":
     render_labels_tab(
@@ -3433,6 +3750,7 @@ elif active_tab == "Labels":
         load_label_catalog_fn=load_label_catalog,
         write_label_catalog_fn=write_label_catalog,
         apply_classification_edits_if_changed=_apply_classification_edits_if_changed,
+        mobile_mode=mobile_mode,
     )
 else:
     _quality_panel(edited_count=edited_count, not_edited_count=not_edited_count)

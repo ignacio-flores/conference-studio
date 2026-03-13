@@ -53,6 +53,19 @@ class ProgrammeViewTests(unittest.TestCase):
         self.assertIn("show_title=False", app_text)
         self.assertIn('"Archive reason"', app_text)
         self.assertIn("_render_archive_controls(", app_text)
+        self.assertIn('kind == "overflow"', app_text)
+        self.assertIn('"overflow_order"', app_text)
+        self.assertIn('key=f"select_overflow_{session.session_id}_{overflow_order}"', app_text)
+        self.assertIn('[!] (overflow #{overflow_order})', app_text)
+
+    def test_programme_view_includes_mobile_dialog_and_compare_mode(self) -> None:
+        app_text = (APP_ROOT / "app.py").read_text(encoding="utf-8")
+        programme_text = (APP_ROOT / "ui" / "programme.py").read_text(encoding="utf-8")
+        self.assertIn('@st.dialog("Programme inspector", width="large")', app_text)
+        self.assertIn("mobile_mode=mobile_mode", app_text)
+        self.assertIn("open_mobile_inspector_dialog", programme_text)
+        self.assertIn('"Compare multiple rooms"', programme_text)
+        self.assertIn("if mobile_mode and not compare_mode:", programme_text)
 
 
 if __name__ == "__main__":
