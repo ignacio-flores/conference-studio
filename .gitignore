@@ -1,2 +1,7 @@
 __pycache__/
 *.pyc
+.worktrees/
+.venv/
+.venv_linux/
+.venv_linux.broken.*
+*.DS_Store

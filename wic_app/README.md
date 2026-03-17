@@ -1,14 +1,18 @@
-# WIC Sessions Reclassification Studio
+# Conference Studio
 
 ## Easiest way (double-click)
 
 In Finder, double-click:
 
-- `Launch_WIC_Studio.command`
+- `Conference_Studio.command`
+
+On Windows, double-click:
+
+- `Conference_Studio_Windows.cmd`
 
 On Linux, run:
 
-- `./Launch_WIC_Studio_Linux.sh`
+- `./Conference_Studio_Linux.sh`
 
 What it does automatically:
 
@@ -20,6 +24,11 @@ Linux notes:
 
 - Uses `.venv_linux` (separate from `.venv`) to avoid cross-OS virtualenv issues.
 - If your distro disables `ensurepip`, the launcher auto-falls back to `--system-site-packages`.
+
+Windows notes:
+
+- Uses `.venv_windows` (separate from `.venv` and `.venv_linux`) to avoid cross-OS virtualenv issues.
+- Prefers `py -3` and falls back to `python` if the Python launcher is unavailable.
 
 ## Folder layout
 

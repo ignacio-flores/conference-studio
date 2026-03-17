@@ -4,23 +4,38 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+VENV_DIR=".venv"
+REQUIREMENTS_FILE="wic_app/requirements.txt"
+APP_ENTRYPOINT="wic_app/app.py"
+REQ_HASH_FILE="$VENV_DIR/.requirements.sha256"
+
 if ! command -v python3 >/dev/null 2>&1; then
   echo "Error: python3 is not installed or not in PATH."
   read -r -p "Press Enter to close..." _
   exit 1
 fi
 
-if [ ! -d ".venv" ]; then
-  echo "Creating local virtual environment (.venv)..."
-  python3 -m venv .venv
-fi
+venv_python() {
+  echo "$VENV_DIR/bin/python3"
+}
 
-# shellcheck disable=SC1091
-source .venv/bin/activate
+ensure_venv() {
+  if [ -x "$(venv_python)" ]; then
+    return
+  fi
 
-REQ_HASH_FILE=".venv/.requirements.sha256"
-REQUIREMENTS_FILE="wic_app/requirements.txt"
-APP_ENTRYPOINT="wic_app/app.py"
+  if [ -e "$VENV_DIR" ]; then
+    backup="${VENV_DIR}.broken.$(date +%Y%m%d%H%M%S)"
+    echo "Detected unusable local virtual environment at $VENV_DIR."
+    mv "$VENV_DIR" "$backup"
+    echo "Moved old environment to $backup"
+  fi
+
+  echo "Creating local virtual environment ($VENV_DIR)..."
+  python3 -m venv "$VENV_DIR"
+}
+
+ensure_venv
 
 if [ ! -f "$REQUIREMENTS_FILE" ]; then
   echo "Error: missing $REQUIREMENTS_FILE"
@@ -37,15 +52,15 @@ fi
 
 if [ "$CURRENT_HASH" != "$INSTALLED_HASH" ]; then
   echo "Installing/updating dependencies..."
-  python -m pip install --upgrade pip
-  python -m pip install -r "$REQUIREMENTS_FILE"
+  "$(venv_python)" -m pip install --upgrade pip
+  "$(venv_python)" -m pip install -r "$REQUIREMENTS_FILE"
   echo "$CURRENT_HASH" > "$REQ_HASH_FILE"
 else
   echo "Dependencies are up to date."
 fi
 
 echo "Starting WIC Reclassification Studio..."
-python -m streamlit run "$APP_ENTRYPOINT"
+"$(venv_python)" -m streamlit run "$APP_ENTRYPOINT"
 
 echo
 echo "WIC Studio stopped."
