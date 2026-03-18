@@ -13,8 +13,10 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+from bundle_public_app import assemble_public_bundle
 from engine.config import load_conference_config
 from exporters.publish import export_draft_workbook, export_publish_excel, export_publish_pdf
+from preview_public_bundle import ensure_public_bundle_preview
 from reclassification_engine import (
     CLASSIFICATION_OVERRIDES_FILE,
     EMPTY_LABEL_SENTINEL,
@@ -349,6 +351,15 @@ def _load_ui_settings() -> Dict[str, object]:
 def _write_ui_settings(payload: Dict[str, object]) -> None:
     UI_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     UI_SETTINGS_FILE.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _publish_public_bundle(state) -> Path:
+    return assemble_public_bundle(state)
+
+
+def _preview_public_bundle(state) -> Dict[str, object]:
+    bundle_path = assemble_public_bundle(state)
+    return ensure_public_bundle_preview(bundle_path)
 
 
 def _save_conference_label(label: object) -> None:
@@ -3660,6 +3671,8 @@ if mobile_mode:
         export_publish_excel=export_publish_excel,
         export_publish_pdf=export_publish_pdf,
         export_draft_workbook=export_draft_workbook,
+        publish_public_bundle=_publish_public_bundle,
+        preview_public_bundle=_preview_public_bundle,
     )
 else:
     nav_col, actions_col = st.columns([5.2, 1.8], gap="small")
@@ -3698,6 +3711,8 @@ else:
             export_publish_excel=export_publish_excel,
             export_publish_pdf=export_publish_pdf,
             export_draft_workbook=export_draft_workbook,
+            publish_public_bundle=_publish_public_bundle,
+            preview_public_bundle=_preview_public_bundle,
         )
 
 active_tab = _normalize_text(st.session_state.get("active_tab", TAB_LABELS[0]))

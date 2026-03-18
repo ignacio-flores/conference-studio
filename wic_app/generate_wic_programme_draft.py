@@ -12,7 +12,14 @@ import argparse
 from pathlib import Path
 
 from engine.config import load_conference_config
-from exporters.publish import export_draft_workbook, export_publish_excel, export_publish_pdf
+from exporters.publish import (
+    export_draft_workbook,
+    export_public_excel,
+    export_public_payload,
+    export_publish_excel,
+    export_publish_pdf,
+)
+from public_data import PUBLIC_JSON_FILE, PUBLIC_XLSX_FILE
 from reclassification_engine import (
     DRAFT_OUTPUT_FILE,
     PUBLISH_PDF_FILE,
@@ -42,6 +49,8 @@ def main() -> None:
     draft_output = DRAFT_OUTPUT_FILE.parent / conference_config.files.get("draft_output", DRAFT_OUTPUT_FILE.name)
     publish_xlsx_output = PUBLISH_XLSX_FILE.parent / conference_config.files.get("publish_xlsx_output", PUBLISH_XLSX_FILE.name)
     publish_pdf_output = PUBLISH_PDF_FILE.parent / conference_config.files.get("publish_pdf_output", PUBLISH_PDF_FILE.name)
+    public_json_output = PUBLIC_JSON_FILE.parent / conference_config.files.get("public_json_output", PUBLIC_JSON_FILE.name)
+    public_xlsx_output = PUBLIC_XLSX_FILE.parent / conference_config.files.get("public_xlsx_output", PUBLIC_XLSX_FILE.name)
 
     state = build_programme_state(config_path=config_path)
     validations = state.validations
@@ -64,6 +73,10 @@ def main() -> None:
         print(f"Missing papers: {validations['missing_submission_ids']}")
 
     if args.publish:
+        public_json_path = export_public_payload(state, public_json_output)
+        print(f"Generated public JSON: {public_json_path}")
+        public_xlsx_path = export_public_excel(state, public_xlsx_output)
+        print(f"Generated public workbook: {public_xlsx_path}")
         xlsx_path = export_publish_excel(state, publish_xlsx_output)
         print(f"Generated publish workbook: {xlsx_path}")
         try:

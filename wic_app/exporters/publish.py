@@ -11,6 +11,7 @@ import xlsxwriter
 from engine.config import load_conference_config
 from engine.scheduling import build_equal_time_ranges
 from exporters.common import group_sessions_by_day_block, ordered_sessions, paper_row_lookup
+from public_data import PUBLIC_JSON_FILE, PUBLIC_XLSX_FILE, build_public_payload, write_public_payload
 from reclassification_engine import (
     DAY_ORDER,
     DRAFT_OUTPUT_FILE,
@@ -469,6 +470,106 @@ def export_draft_workbook(state: ProgrammeState, output_path: Path = DRAFT_OUTPU
         ws_theme.write(row, 2, stats["sessions"], cell_fmt)
         ws_theme.write(row, 3, stats["papers"], cell_fmt)
         row += 1
+
+    wb.close()
+    return output_path
+
+
+def export_public_payload(state: ProgrammeState, output_path: Path = PUBLIC_JSON_FILE) -> Path:
+    conference = load_conference_config()
+    payload = build_public_payload(state, conference)
+    return write_public_payload(payload, output_path)
+
+
+def export_public_excel(state: ProgrammeState, output_path: Path = PUBLIC_XLSX_FILE) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    conference = load_conference_config()
+    payload = build_public_payload(state, conference)
+
+    wb = xlsxwriter.Workbook(str(output_path))
+    title_fmt = wb.add_format({"bold": True, "font_size": 20})
+    subtitle_fmt = wb.add_format({"bold": True, "font_size": 14})
+    header_fmt = wb.add_format({"bold": True, "bg_color": "#E8EEF8", "border": 1, "valign": "top"})
+    cell_fmt = wb.add_format({"border": 1, "valign": "top"})
+    wrap_fmt = wb.add_format({"border": 1, "valign": "top", "text_wrap": True})
+
+    ws_cover = wb.add_worksheet("Cover")
+    ws_cover.set_column(0, 0, 90)
+    ws_cover.write(0, 0, payload["conference"]["title"], title_fmt)
+    ws_cover.write(2, 0, payload["conference"]["subtitle"], subtitle_fmt)
+    ws_cover.write(4, 0, f"Generated: {payload['conference']['generated_at']}", cell_fmt)
+    ws_cover.write(6, 0, "This workbook is a public read-only programme export.", cell_fmt)
+    ws_cover.write(8, 0, f"Sessions: {len(payload['sessions'])}", cell_fmt)
+    ws_cover.write(9, 0, f"Papers: {len(payload['papers'])}", cell_fmt)
+
+    ws_sessions = wb.add_worksheet("Sessions")
+    session_headers = [
+        "SessionCode",
+        "SessionTitle",
+        "Day",
+        "Time",
+        "Block",
+        "Room",
+        "PrimaryTheme",
+        "Subtheme",
+        "Talks",
+    ]
+    ws_sessions.write_row(0, 0, session_headers, header_fmt)
+    ws_sessions.freeze_panes(1, 0)
+    ws_sessions.set_column(0, 0, 16)
+    ws_sessions.set_column(1, 1, 40)
+    ws_sessions.set_column(2, 5, 18)
+    ws_sessions.set_column(6, 7, 32)
+    ws_sessions.set_column(8, 8, 60)
+    for row_idx, session in enumerate(payload["sessions"], start=1):
+        ws_sessions.write(row_idx, 0, session["session_code"], cell_fmt)
+        ws_sessions.write(row_idx, 1, session["session_title"], wrap_fmt)
+        ws_sessions.write(row_idx, 2, session["day_label"], cell_fmt)
+        ws_sessions.write(row_idx, 3, session["time"], cell_fmt)
+        ws_sessions.write(row_idx, 4, session["block_label"], wrap_fmt)
+        ws_sessions.write(row_idx, 5, session["room"], cell_fmt)
+        ws_sessions.write(row_idx, 6, session["primary_theme"], wrap_fmt)
+        ws_sessions.write(row_idx, 7, session["subtheme"], wrap_fmt)
+        ws_sessions.write(
+            row_idx,
+            8,
+            "\n".join(f"{talk['authors']} - {talk['title']}" for talk in session["talks"]),
+            wrap_fmt,
+        )
+
+    ws_papers = wb.add_worksheet("Papers")
+    paper_headers = [
+        "SubmissionID",
+        "Authors",
+        "Title",
+        "Abstract",
+        "SessionCode",
+        "SessionTitle",
+        "Day",
+        "Time",
+        "Room",
+        "PrimaryTheme",
+        "Subtheme",
+    ]
+    ws_papers.write_row(0, 0, paper_headers, header_fmt)
+    ws_papers.freeze_panes(1, 0)
+    ws_papers.set_column(0, 1, 18)
+    ws_papers.set_column(2, 2, 52)
+    ws_papers.set_column(3, 3, 80)
+    ws_papers.set_column(4, 5, 20)
+    ws_papers.set_column(6, 10, 18)
+    for row_idx, paper in enumerate(payload["papers"], start=1):
+        ws_papers.write(row_idx, 0, paper["submission_id"], cell_fmt)
+        ws_papers.write(row_idx, 1, paper["authors"], wrap_fmt)
+        ws_papers.write(row_idx, 2, paper["title"], wrap_fmt)
+        ws_papers.write(row_idx, 3, paper["abstract"], wrap_fmt)
+        ws_papers.write(row_idx, 4, paper["session_code"], cell_fmt)
+        ws_papers.write(row_idx, 5, paper["session_title"], wrap_fmt)
+        ws_papers.write(row_idx, 6, paper["day_label"], cell_fmt)
+        ws_papers.write(row_idx, 7, paper["time"], cell_fmt)
+        ws_papers.write(row_idx, 8, paper["room"], cell_fmt)
+        ws_papers.write(row_idx, 9, paper["primary_theme"], wrap_fmt)
+        ws_papers.write(row_idx, 10, paper["subtheme"], wrap_fmt)
 
     wb.close()
     return output_path

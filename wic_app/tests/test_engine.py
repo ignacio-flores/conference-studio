@@ -1,18 +1,28 @@
 from __future__ import annotations
 
 import copy
+import json
 import shutil
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 
 from engine.config import load_conference_config
-from exporters.publish import export_draft_workbook, export_publish_excel, export_publish_pdf
+from engine.validation import validate_programme_state
+from exporters.publish import (
+    export_draft_workbook,
+    export_public_excel,
+    export_public_payload,
+    export_publish_excel,
+    export_publish_pdf,
+)
 from reclassification_engine import (
     CLASSIFICATION_OVERRIDES_FILE,
     MANUAL_TALKS_FILE,
@@ -131,18 +141,68 @@ class EngineTests(unittest.TestCase):
     def test_validation_happy_path(self) -> None:
         state = build_programme_state()
         self.assertTrue(state.validations["hard_constraints_ok"])
-        self.assertTrue(state.validations["is_valid"])
+        self.assertEqual(
+            state.validations["is_valid"],
+            state.validations["hard_constraints_ok"] and not state.validations["has_planning_issues"],
+        )
+
+    def test_validate_programme_state_marks_clean_plan_valid(self) -> None:
+        config = load_conference_config()
+        paper = SimpleNamespace(submission_id="P1", reviewed=True)
+        session = SimpleNamespace(
+            session_code="D1-B1-R1",
+            day_num=2,
+            time="11h15-12h45",
+            block_label="SESSION 1",
+            room="R1",
+            capacity=1,
+            papers=[paper],
+            overflow_papers=[],
+        )
+        state = SimpleNamespace(
+            papers=[paper],
+            sessions=[session],
+            inactive_sessions=[],
+            unassigned_papers=[],
+            slot_conflicts=[],
+        )
+
+        validations = validate_programme_state(state, config)
+
+        self.assertTrue(validations["hard_constraints_ok"])
+        self.assertFalse(validations["has_planning_issues"])
+        self.assertTrue(validations["is_valid"])
 
     def test_exports_smoke(self) -> None:
         state = build_programme_state()
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             draft_path = export_draft_workbook(state, tmp_path / "draft.xlsx")
+            public_xlsx_path = export_public_excel(state, tmp_path / "public.xlsx")
+            public_payload_path = export_public_payload(state, tmp_path / "programme.json")
             publish_xlsx_path = export_publish_excel(state, tmp_path / "publish.xlsx")
             self.assertTrue(draft_path.exists())
+            self.assertTrue(public_xlsx_path.exists())
+            self.assertTrue(public_payload_path.exists())
             self.assertTrue(publish_xlsx_path.exists())
             self.assertGreater(draft_path.stat().st_size, 0)
+            self.assertGreater(public_xlsx_path.stat().st_size, 0)
+            self.assertGreater(public_payload_path.stat().st_size, 0)
             self.assertGreater(publish_xlsx_path.stat().st_size, 0)
+            payload = json.loads(public_payload_path.read_text(encoding="utf-8"))
+            if payload["papers"]:
+                first_paper = payload["papers"][0]
+                self.assertNotIn("email", first_paper)
+                self.assertNotIn("reviewer_score", first_paper)
+                self.assertNotIn("link_to_pdf", first_paper)
+            with zipfile.ZipFile(public_xlsx_path) as archive:
+                workbook_text = "\n".join(
+                    archive.read(name).decode("utf-8", errors="ignore")
+                    for name in archive.namelist()
+                    if name.endswith(".xml")
+                )
+            self.assertNotIn("LinkToPDF", workbook_text)
+            self.assertNotIn("Open PDF", workbook_text)
 
             try:
                 publish_pdf_path = export_publish_pdf(state, tmp_path / "publish.pdf")

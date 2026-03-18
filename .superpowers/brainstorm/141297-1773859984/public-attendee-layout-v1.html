@@ -1,0 +1,111 @@
+<h2>Public Conference UX</h2>
+<p class="subtitle">Which attendee-facing layout feels better? Both keep the app close to the current editable tabs, but remove editing and emphasize wayfinding during the conference.</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A. Structure First + Session Drawer (Recommended)</div>
+        <div class="mockup-body">
+          <div style="display:flex; gap:10px; margin-bottom:10px;">
+            <button class="mock-button">Structure</button>
+            <button class="mock-button" style="opacity:.65;">Programme</button>
+            <button class="mock-button" style="opacity:.65;">Papers</button>
+          </div>
+          <div style="display:flex; gap:12px;">
+            <div style="flex:2;">
+              <div style="display:grid; grid-template-columns: 120px repeat(4, 1fr); gap:8px;">
+                <div class="placeholder">Block / Time</div>
+                <div class="placeholder">Room A</div>
+                <div class="placeholder">Room B</div>
+                <div class="placeholder">Room C</div>
+                <div class="placeholder">Room D</div>
+                <div class="placeholder">09:00</div>
+                <div class="placeholder">Session 1<br>4/4</div>
+                <div class="placeholder">Session 2<br>3/4</div>
+                <div class="placeholder">Session 3<br>4/4</div>
+                <div class="placeholder">Session 4<br>4/4</div>
+                <div class="placeholder">11:00</div>
+                <div class="placeholder">Session 5<br>4/4</div>
+                <div class="placeholder">Session 6<br>4/4</div>
+                <div class="placeholder">Session 7<br>2/4</div>
+                <div class="placeholder">Session 8<br>4/4</div>
+              </div>
+            </div>
+            <div style="flex:1; border:1px solid #c8d2de; border-radius:10px; padding:10px; background:#fafcfe;">
+              <div class="label">Selected Session</div>
+              <h3 style="margin-top:4px;">Session 3</h3>
+              <p>Room C · 09:00 · Environmental inequalities</p>
+              <p><strong>Papers</strong></p>
+              <p>1. Author A — Paper title</p>
+              <p>2. Author B — Paper title</p>
+              <p>3. Author C — Paper title</p>
+              <p style="font-size:.9em; color:#5f6f86;">Drawer also shows abstracts and a quick “back to matrix” path.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Matrix + Drawer</h3>
+      <p>Closest to the editable Structure tab. Attendees keep the room/block overview while inspecting one session at a time.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B. Structure First + Expanded Block Stack</div>
+        <div class="mockup-body">
+          <div style="display:flex; gap:10px; margin-bottom:10px;">
+            <button class="mock-button">Structure</button>
+            <button class="mock-button" style="opacity:.65;">Programme</button>
+            <button class="mock-button" style="opacity:.65;">Papers</button>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <div class="placeholder" style="padding:14px;">
+              <strong>09:00 block</strong><br>
+              Rooms A-D visible as session cards
+            </div>
+            <div style="border:1px solid #c8d2de; border-radius:10px; padding:10px; background:#fafcfe;">
+              <div class="label">Expanded Session</div>
+              <h3 style="margin-top:4px;">Session 3</h3>
+              <p>Authors and paper titles appear inline below the matrix row.</p>
+              <p style="font-size:.9em; color:#5f6f86;">Good for mobile scanning, but the page grows long during busy blocks.</p>
+            </div>
+            <div class="placeholder" style="padding:14px;">
+              <strong>11:00 block</strong><br>
+              Next row of rooms and sessions
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Matrix + Inline Expansion</h3>
+      <p>Still structure-first, but less panel-like. Simpler mechanically, though it can get long and crowded for a dense conference schedule.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Recommended Direction</h4>
+      <ul>
+        <li>Keep `Structure` as the landing tab.</li>
+        <li>Add a read-only session drawer with paper titles, authors, and abstracts.</li>
+        <li>Keep `Programme` as the second tab for the existing schedule flow.</li>
+        <li>Keep `Papers` as the third tab, but make it attendee-oriented instead of admin-oriented.</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>What To Remove</h4>
+      <ul>
+        <li>No inspector language.</li>
+        <li>No edit buttons, add-room controls, or empty-slot affordances.</li>
+        <li>No admin metrics like overflow or inactive sessions in the public view.</li>
+      </ul>
+    </div>
+  </div>
+</div>

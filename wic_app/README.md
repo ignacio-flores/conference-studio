@@ -32,9 +32,11 @@ Windows notes:
 
 ## Folder layout
 
-- `source_data/`: original input files used to build drafts
-- `exports/`: generated draft/publish outputs
-- `wic_app/`: app code, engine, exporters, and `state/`
+- `source_data/`: local-only input files used to build drafts. Do not publish this folder.
+- `exports/`: local-only draft/publish outputs from the editor workflow.
+- `public_data/`: generated public JSON/XLSX artifacts intended for the read-only deployed app.
+- `public_bundle/`: generated self-contained folder to copy into the separate public repo.
+- `wic_app/`: app code, engine, exporters, and local `state/`
 
 ## Setup
 
@@ -42,7 +44,7 @@ Windows notes:
 python3 -m pip install -r wic_app/requirements.txt
 ```
 
-## Run the curation UI
+## Run the local editor
 
 ```bash
 streamlit run wic_app/app.py
@@ -58,30 +60,16 @@ streamlit run wic_app/app.py --server.address 0.0.0.0 --server.port 8501
 
 Then open `http://<host-machine-ip>:8501` from your phone on the same Wi-Fi/LAN.
 
-### Hosted deployment baseline
+### Local-only working data
 
-Password gating is dormant by default. It is enabled only when
-`APP_REQUIRE_AUTH=true`.
+The editor auto-saves working changes into `wic_app/state/*.csv`. That state is
+private working data and should stay local.
 
-For internet-hosted usage, enable app-level password gating with env vars:
+If you sync the project with Dropbox, treat it as single-writer storage:
 
-```bash
-export APP_PASSWORD='change-this-password'
-export APP_REQUIRE_AUTH=true
-streamlit run wic_app/app.py --server.address 0.0.0.0 --server.port 8501
-```
-
-When auth is enabled, the app reads `APP_PASSWORD` from environment first, then
-falls back to Streamlit secrets.
-
-Optional `secrets.toml` example:
-
-```toml
-# .streamlit/secrets.toml
-APP_PASSWORD = "change-this-password"
-```
-
-You still need `APP_REQUIRE_AUTH=true` in the environment to activate the gate.
+- one machine editing at a time
+- let Dropbox finish syncing before opening the app elsewhere
+- do not rely on Dropbox for concurrent editing
 
 ## Workflow
 
@@ -91,7 +79,7 @@ You still need `APP_REQUIRE_AUTH=true` in the environment to activate the gate.
 4. Edit session titles from the Inspector.
 5. Click any session/slot block to open the **Inspector** automatically; use `✕` to close it.
 6. Every edit is auto-applied, auto-saved (`wic_app/state/*.csv`), and synced across tabs.
-7. Use top action buttons for **Publish**, **Undo**, **Reload**, and **Export Draft**.
+7. Use top action buttons for **Publish**, **Prepare Public Bundle**, **Preview Public Bundle**, **Undo**, **Reload**, and **Export Draft**.
 
 ## CLI generation
 
@@ -107,6 +95,12 @@ Draft + publish outputs:
 python3 wic_app/generate_wic_programme_draft.py --publish
 ```
 
+`--publish` now generates:
+
+- local publish workbook/PDF outputs
+- `public_data/programme.json` for the deployed read-only Streamlit app
+- `public_data/programme.xlsx` for public download
+
 Using a custom conference profile:
 
 ```bash
@@ -121,6 +115,62 @@ streamlit run wic_app/app.py
 ```
 
 The default profile is stored at `wic_app/assets/conference.default.json`.
+
+## Public deployment
+
+The public deployment uses a separate read-only entrypoint:
+
+```bash
+streamlit run wic_app/public_app.py
+```
+
+The public app reads only `public_data/programme.json` by default. It does not
+load `source_data/` or `wic_app/state/`.
+
+Keep the public site hidden until you are ready:
+
+```bash
+export PUBLIC_ENABLED=false
+streamlit run wic_app/public_app.py
+```
+
+When you want to publish it:
+
+```bash
+python3 wic_app/generate_wic_programme_draft.py --publish
+export PUBLIC_ENABLED=true
+streamlit run wic_app/public_app.py
+```
+
+Optional overrides for deployed environments:
+
+```bash
+export PUBLIC_JSON_PATH=/path/to/programme.json
+export PUBLIC_XLSX_PATH=/path/to/programme.xlsx
+```
+
+## Public bundle workflow
+
+If you want a separate public repository, use **Prepare Public Bundle** in the
+editor Actions menu. That generates a local `public_bundle/` folder with:
+
+- `wic_app/public_app.py`
+- `wic_app/public_data.py`
+- `public_data/programme.json`
+- `public_data/programme.xlsx`
+- `requirements.txt`
+- `README.md`
+
+`public_bundle/` is designed to work while isolated. Copy its contents into the
+separate public repo, commit there, and deploy that repo independently.
+
+## Security notes
+
+- Do not publish `source_data/`, `exports/`, or `wic_app/state/`.
+- Do not publish this private repo directly; use `public_bundle/` or a cleaned public repo.
+- Do not store Streamlit secrets in git; keep `.streamlit/secrets.toml` local.
+- The public app is read-only by construction and should only be deployed with generated artifacts from `public_data/`.
+- If this repository already contains sensitive tracked files from earlier local-only use, remove them from git before making the repository public.
 
 ## Optional branding
 

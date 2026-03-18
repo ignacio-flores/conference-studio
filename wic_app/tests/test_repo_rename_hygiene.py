@@ -14,6 +14,14 @@ class RepoRenameHygieneTests(unittest.TestCase):
         self.assertIn(".venv/", text)
         self.assertIn(".venv_linux/", text)
 
+    def test_gitignore_excludes_private_working_data(self) -> None:
+        text = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("source_data/", text)
+        self.assertIn("exports/", text)
+        self.assertIn("wic_app/state/", text)
+        self.assertIn("public_bundle/", text)
+        self.assertIn(".streamlit/secrets.toml", text)
+
     def test_readme_uses_current_conference_studio_names(self) -> None:
         text = (REPO_ROOT / "wic_app" / "README.md").read_text(encoding="utf-8")
         self.assertIn("# Conference Studio", text)
@@ -22,6 +30,15 @@ class RepoRenameHygieneTests(unittest.TestCase):
         self.assertNotIn("Launch_WIC_Studio.command", text)
         self.assertNotIn("Launch_WIC_Studio_Linux.sh", text)
         self.assertNotIn("WIC Sessions Reclassification Studio", text)
+
+    def test_readme_documents_public_release_flow(self) -> None:
+        text = (REPO_ROOT / "wic_app" / "README.md").read_text(encoding="utf-8")
+        self.assertIn("streamlit run wic_app/public_app.py", text)
+        self.assertIn("PUBLIC_ENABLED", text)
+        self.assertIn("public_data/programme.json", text)
+        self.assertIn("Dropbox", text)
+        self.assertIn("public_bundle/", text)
+        self.assertIn("Prepare Public Bundle", text)
 
     def test_repo_does_not_track_virtualenv_directories(self) -> None:
         completed = subprocess.run(
