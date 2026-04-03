@@ -1,12 +1,50 @@
 from __future__ import annotations
 
-from typing import Callable, Dict, List
+import re
+from typing import Callable, Dict, Iterable, List, Sequence
 
 import streamlit as st
+
+from reclassification_engine import DEFAULT_ARCHIVE_REASON_OPTIONS
 
 
 def _normalize_text(value: object) -> str:
     return str(value or "").strip()
+
+
+def parse_archive_reason_values(raw: object) -> List[str]:
+    text = str(raw or "")
+    parts = re.split(r"[,;\n]+", text)
+    labels: List[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        cleaned = _normalize_text(part)
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        labels.append(cleaned)
+    return labels
+
+
+def resolve_archive_reason_options(
+    catalog_reasons: Sequence[str],
+    archive_overrides: Dict[str, Dict[str, str]],
+) -> List[str]:
+    options: List[str] = []
+    seen: set[str] = set()
+    for candidate in list(DEFAULT_ARCHIVE_REASON_OPTIONS) + list(catalog_reasons):
+        cleaned = _normalize_text(candidate)
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        options.append(cleaned)
+    for row in list(archive_overrides.values()):
+        cleaned = _normalize_text(row.get("ArchiveReason", "")) or "Other"
+        if cleaned in seen:
+            continue
+        seen.add(cleaned)
+        options.append(cleaned)
+    return options
 
 
 def _sort_archived_key(paper: object, archive_row: Dict[str, str]) -> tuple:
@@ -43,13 +81,89 @@ def _previous_placement_label(archive_row: Dict[str, str], sessions_by_id: Dict[
     return "Overflow"
 
 
+def filter_archived_papers(
+    archived_papers: Iterable[object],
+    archive_overrides: Dict[str, Dict[str, str]],
+    *,
+    query: str,
+    reason_filter: str,
+) -> List[object]:
+    filtered: List[object] = []
+    for paper in list(archived_papers or []):
+        sid = _normalize_text(getattr(paper, "submission_id", ""))
+        row = archive_overrides.get(sid, {})
+        reason = _normalize_text(row.get("ArchiveReason", "")) or "Other"
+        if reason_filter != "All" and reason != _normalize_text(reason_filter):
+            continue
+
+        if _normalize_text(query):
+            q = _normalize_text(query).lower()
+            haystack = " ".join(
+                [
+                    _normalize_text(getattr(paper, "submission_id", "")),
+                    _normalize_text(getattr(paper, "title", "")),
+                    _normalize_text(getattr(paper, "full_name", "")),
+                ]
+            ).lower()
+            if q not in haystack:
+                continue
+
+        filtered.append(paper)
+    return filtered
+
+
+def filtered_archived_submission_ids(
+    archived_papers: Iterable[object],
+    archive_overrides: Dict[str, Dict[str, str]],
+    *,
+    query: str,
+    reason_filter: str,
+) -> List[str]:
+    return [
+        _normalize_text(getattr(paper, "submission_id", ""))
+        for paper in filter_archived_papers(
+            archived_papers,
+            archive_overrides,
+            query=query,
+            reason_filter=reason_filter,
+        )
+        if _normalize_text(getattr(paper, "submission_id", ""))
+    ]
+
+
 def render_archived_tab(
     state,
     archive_overrides: Dict[str, Dict[str, str]],
     restore_archived_paper: Callable[[str], bool],
+    archive_reason_options: Sequence[str],
+    load_archive_reason_labels: Callable[[], List[str]],
+    add_archive_reason_labels: Callable[[Iterable[str]], bool],
+    bulk_update_archived_reason: Callable[[List[str], str], bool],
     mobile_mode: bool = False,
 ) -> None:
     st.subheader("Archived")
+
+    with st.expander("Archive reason labels", expanded=False):
+        current_labels = list(load_archive_reason_labels() or [])
+        if current_labels:
+            st.caption(f"Saved labels: {', '.join(current_labels)}")
+        else:
+            st.caption("No saved archive reason labels yet. Default suggestions still stay available.")
+        new_labels_raw = st.text_area(
+            "New archive reason labels",
+            value="",
+            height=80,
+            key="archived_reason_labels_input",
+        )
+        if st.button("Add archive labels", key="archived_reason_labels_add", use_container_width=True):
+            new_labels = parse_archive_reason_values(new_labels_raw)
+            if not new_labels:
+                st.info("Enter at least one archive reason label.")
+            elif add_archive_reason_labels(new_labels):
+                st.rerun()
+            else:
+                st.info("No new archive reason labels were added.")
+
     archived_papers = list(getattr(state, "archived_papers", []) or [])
     if not archived_papers:
         st.info("No archived papers.")
@@ -65,39 +179,38 @@ def render_archived_tab(
     else:
         query_col, reason_col = st.columns([3.2, 1.4])
         query = query_col.text_input("Search title/presenter/submission ID", "")
-    reason_options = sorted(
-        {
-            _normalize_text(archive_overrides.get(_normalize_text(getattr(paper, "submission_id", "")), {}).get("ArchiveReason", "Other"))
-            or "Other"
-            for paper in archived_papers
-        }
-    )
     if mobile_mode:
-        reason_filter = st.selectbox("Reason", ["All"] + reason_options)
+        reason_filter = st.selectbox("Reason", ["All"] + list(archive_reason_options))
     else:
-        reason_filter = reason_col.selectbox("Reason", ["All"] + reason_options)
+        reason_filter = reason_col.selectbox("Reason", ["All"] + list(archive_reason_options))
 
-    filtered: List[object] = []
-    for paper in archived_papers:
-        sid = _normalize_text(getattr(paper, "submission_id", ""))
-        row = archive_overrides.get(sid, {})
-        reason = _normalize_text(row.get("ArchiveReason", "")) or "Other"
-        if reason_filter != "All" and reason != reason_filter:
-            continue
+    filtered = filter_archived_papers(
+        archived_papers,
+        archive_overrides,
+        query=query,
+        reason_filter=reason_filter,
+    )
+    filtered_ids = filtered_archived_submission_ids(
+        archived_papers,
+        archive_overrides,
+        query=query,
+        reason_filter=reason_filter,
+    )
 
-        if query.strip():
-            q = query.strip().lower()
-            haystack = " ".join(
-                [
-                    _normalize_text(getattr(paper, "submission_id", "")),
-                    _normalize_text(getattr(paper, "title", "")),
-                    _normalize_text(getattr(paper, "full_name", "")),
-                ]
-            ).lower()
-            if q not in haystack:
-                continue
-
-        filtered.append(paper)
+    bulk_reason = st.selectbox(
+        "New archive reason",
+        list(archive_reason_options),
+        key="archived_bulk_reason",
+    )
+    if st.button(
+        f"Apply to {len(filtered_ids)} filtered archived paper(s)",
+        key="archived_bulk_reason_apply",
+        use_container_width=True,
+        disabled=not filtered_ids,
+    ):
+        if bulk_update_archived_reason(filtered_ids, bulk_reason):
+            st.rerun()
+        st.info("No archived reason changes detected.")
 
     if not filtered:
         st.info("No archived papers match the current filters.")

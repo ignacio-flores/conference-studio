@@ -427,6 +427,8 @@ MANUAL_TALKS_HEADERS = [
 
 LABEL_TYPE_PRIMARY = "primary"
 LABEL_TYPE_SECONDARY = "secondary"
+LABEL_TYPE_ARCHIVE_REASON = "archive_reason"
+DEFAULT_ARCHIVE_REASON_OPTIONS = ["Duplicate submission", "Author cancelled attendance", "Other"]
 LABEL_CATALOG_HEADERS = ["LabelType", "LabelValue", "UpdatedAt"]
 
 
@@ -982,7 +984,7 @@ def _load_csv_rows(path: Path, expected_headers: List[str]) -> List[Dict[str, st
 
 def _normalize_label_type(value: object) -> str:
     label_type = str(value or "").strip().lower()
-    return label_type if label_type in {LABEL_TYPE_PRIMARY, LABEL_TYPE_SECONDARY} else ""
+    return label_type if label_type in {LABEL_TYPE_PRIMARY, LABEL_TYPE_SECONDARY, LABEL_TYPE_ARCHIVE_REASON} else ""
 
 
 def load_label_catalog(path: Path = LABEL_CATALOG_FILE) -> Dict[str, List[str]]:
@@ -990,6 +992,7 @@ def load_label_catalog(path: Path = LABEL_CATALOG_FILE) -> Dict[str, List[str]]:
     labels_by_type = {
         LABEL_TYPE_PRIMARY: set(),
         LABEL_TYPE_SECONDARY: set(),
+        LABEL_TYPE_ARCHIVE_REASON: set(),
     }
     for row in rows:
         label_type = _normalize_label_type(row.get("LabelType", ""))
@@ -1003,6 +1006,7 @@ def load_label_catalog(path: Path = LABEL_CATALOG_FILE) -> Dict[str, List[str]]:
     return {
         LABEL_TYPE_PRIMARY: sorted(labels_by_type[LABEL_TYPE_PRIMARY], key=str.casefold),
         LABEL_TYPE_SECONDARY: sorted(labels_by_type[LABEL_TYPE_SECONDARY], key=str.casefold),
+        LABEL_TYPE_ARCHIVE_REASON: sorted(labels_by_type[LABEL_TYPE_ARCHIVE_REASON], key=str.casefold),
     }
 
 
@@ -1013,8 +1017,9 @@ def write_label_catalog(
     normalized = {
         LABEL_TYPE_PRIMARY: set(),
         LABEL_TYPE_SECONDARY: set(),
+        LABEL_TYPE_ARCHIVE_REASON: set(),
     }
-    for label_type in (LABEL_TYPE_PRIMARY, LABEL_TYPE_SECONDARY):
+    for label_type in (LABEL_TYPE_PRIMARY, LABEL_TYPE_SECONDARY, LABEL_TYPE_ARCHIVE_REASON):
         for value in list(catalog.get(label_type, []) or []):
             cleaned = str(value or "").strip()
             if cleaned:
@@ -1025,7 +1030,7 @@ def write_label_catalog(
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=LABEL_CATALOG_HEADERS)
         writer.writeheader()
-        for label_type in (LABEL_TYPE_PRIMARY, LABEL_TYPE_SECONDARY):
+        for label_type in (LABEL_TYPE_PRIMARY, LABEL_TYPE_SECONDARY, LABEL_TYPE_ARCHIVE_REASON):
             for value in sorted(normalized[label_type], key=str.casefold):
                 writer.writerow(
                     {
@@ -1039,13 +1044,16 @@ def write_label_catalog(
 def merge_label_catalog_labels(
     primary_values: Iterable[str],
     secondary_values: Iterable[str],
+    archive_reason_values: Iterable[str] = (),
     path: Path = LABEL_CATALOG_FILE,
 ) -> bool:
     existing = load_label_catalog(path)
     current_primary = set(existing.get(LABEL_TYPE_PRIMARY, []))
     current_secondary = set(existing.get(LABEL_TYPE_SECONDARY, []))
+    current_archive_reasons = set(existing.get(LABEL_TYPE_ARCHIVE_REASON, []))
     merged_primary = set(current_primary)
     merged_secondary = set(current_secondary)
+    merged_archive_reasons = set(current_archive_reasons)
 
     for value in list(primary_values or []):
         cleaned = str(value or "").strip()
@@ -1055,14 +1063,23 @@ def merge_label_catalog_labels(
         cleaned = str(value or "").strip()
         if cleaned:
             merged_secondary.add(cleaned)
+    for value in list(archive_reason_values or []):
+        cleaned = str(value or "").strip()
+        if cleaned:
+            merged_archive_reasons.add(cleaned)
 
-    if merged_primary == current_primary and merged_secondary == current_secondary:
+    if (
+        merged_primary == current_primary
+        and merged_secondary == current_secondary
+        and merged_archive_reasons == current_archive_reasons
+    ):
         return False
 
     write_label_catalog(
         {
             LABEL_TYPE_PRIMARY: merged_primary,
             LABEL_TYPE_SECONDARY: merged_secondary,
+            LABEL_TYPE_ARCHIVE_REASON: merged_archive_reasons,
         },
         path=path,
     )
@@ -3391,9 +3408,19 @@ def build_programme_state(
     )
 
     archived_reason_counts: Dict[str, int] = {}
+    archived_by_previous_status: Dict[str, int] = {
+        "scheduled": 0,
+        "overflow": 0,
+        "unassigned": 0,
+    }
     for paper in archived_papers:
-        reason = str(archive_overrides.get(paper.submission_id, {}).get("ArchiveReason", "")).strip() or "Other"
+        archive_row = archive_overrides.get(paper.submission_id, {})
+        reason = str(archive_row.get("ArchiveReason", "")).strip() or "Other"
         archived_reason_counts[reason] = archived_reason_counts.get(reason, 0) + 1
+        previous_status = str(archive_row.get("PreviousPlacementStatus", "")).strip().lower()
+        if previous_status not in archived_by_previous_status:
+            previous_status = "unassigned"
+        archived_by_previous_status[previous_status] = archived_by_previous_status.get(previous_status, 0) + 1
 
     state = ProgrammeState(
         papers=active_papers,
@@ -3407,8 +3434,10 @@ def build_programme_state(
         edited_submission_ids=edited_submission_ids,
     )
     state.validations = validate_programme_state(state, conference_config)
+    state.validations["total_papers"] = len(active_papers) + len(archived_papers)
     state.validations["archived_papers"] = len(archived_papers)
     state.validations["archived_submission_ids"] = sorted([paper.submission_id for paper in archived_papers])
+    state.validations["archived_by_previous_status"] = archived_by_previous_status
     state.validations["archived_by_reason"] = dict(sorted(archived_reason_counts.items(), key=lambda item: item[0]))
     state.validations["edited_submission_ids"] = sorted(edited_submission_ids)
     state.validations["conference_config"] = resolve_config_path(config_path).as_posix()

@@ -19,7 +19,6 @@ paper_list_infinite_scroll_component = components.declare_component(
     "paper_list_infinite_scroll",
     path=str(PAPER_LIST_INFINITE_SCROLL_COMPONENT_DIR),
 )
-ARCHIVE_REASON_OPTIONS = ["Duplicate submission", "Author cancelled attendance", "Other"]
 
 
 def _normalize_text(value: object) -> str:
@@ -276,6 +275,7 @@ def _render_paper_details_panel(
     apply_paper_metadata_edits_if_changed: Callable[[pd.DataFrame], bool],
     apply_paper_session_selection_edit: Callable[[str, Tuple[str, str]], bool],
     apply_archive_paper: Callable[[str, str, str], bool],
+    archive_reason_options: List[str],
     mobile_mode: bool,
 ) -> None:
     is_editing = _normalize_text(st.session_state.get(edit_key, "")) == sid
@@ -384,7 +384,7 @@ def _render_paper_details_panel(
     st.caption("Archive")
     archive_reason = st.selectbox(
         "Archive reason",
-        ARCHIVE_REASON_OPTIONS,
+        list(archive_reason_options),
         key=f"paper_edit_archive_reason_{sid}",
     )
     archive_note = st.text_area(
@@ -431,6 +431,7 @@ def render_paper_list_tab(
     apply_paper_metadata_edits_if_changed: Callable[[pd.DataFrame], bool],
     apply_paper_session_selection_edit: Callable[[str, Tuple[str, str]], bool],
     apply_archive_paper: Callable[[str, str, str], bool],
+    archive_reason_options: List[str],
     mobile_mode: bool = False,
 ) -> None:
     st.subheader("Paper List")
@@ -623,6 +624,7 @@ def render_paper_list_tab(
                 apply_paper_metadata_edits_if_changed=apply_paper_metadata_edits_if_changed,
                 apply_paper_session_selection_edit=apply_paper_session_selection_edit,
                 apply_archive_paper=apply_archive_paper,
+                archive_reason_options=archive_reason_options,
                 mobile_mode=False,
             )
 
@@ -648,6 +650,7 @@ def render_paper_list_tab(
                 apply_paper_metadata_edits_if_changed=apply_paper_metadata_edits_if_changed,
                 apply_paper_session_selection_edit=apply_paper_session_selection_edit,
                 apply_archive_paper=apply_archive_paper,
+                archive_reason_options=archive_reason_options,
                 mobile_mode=True,
             )
 

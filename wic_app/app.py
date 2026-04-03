@@ -7,7 +7,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional
 
 import pandas as pd
 import streamlit as st
@@ -19,8 +19,10 @@ from exporters.publish import export_draft_workbook, export_publish_excel, expor
 from preview_public_bundle import ensure_public_bundle_preview
 from reclassification_engine import (
     CLASSIFICATION_OVERRIDES_FILE,
+    DEFAULT_ARCHIVE_REASON_OPTIONS,
     EMPTY_LABEL_SENTINEL,
     LABEL_CATALOG_FILE,
+    LABEL_TYPE_ARCHIVE_REASON,
     MANUAL_TALKS_FILE,
     PAPER_ARCHIVE_OVERRIDES_FILE,
     PAPER_METADATA_OVERRIDES_FILE,
@@ -67,7 +69,7 @@ from reclassification_engine import (
     write_session_name_overrides,
 )
 from ui.actions import render_top_actions
-from ui.archived import render_archived_tab
+from ui.archived import render_archived_tab, resolve_archive_reason_options
 from ui.inspector_layout import inject_sticky_inspector_css
 from ui.labels import render_labels_tab
 from ui.papers import format_target_session_label, render_paper_list_tab
@@ -106,7 +108,6 @@ TAB_LABELS = ["Programme", "Structure", "Paper List", "Archived", "Labels", "Che
 UNDO_STACK_LIMIT = 20
 DEFAULT_CONFERENCE_LABEL = "WIC 2026"
 UI_SETTINGS_FILE = Path(__file__).resolve().parent / "state" / "ui_settings.json"
-ARCHIVE_REASON_OPTIONS = ["Duplicate submission", "Author cancelled attendance", "Other"]
 OVERFLOW_TEXT_COLOR = "#8a6d00"
 VIEWPORT_DETECTOR_COMPONENT_DIR = (
     Path(__file__).resolve().parent / "ui" / "components" / "viewport_detector"
@@ -871,7 +872,36 @@ def _apply_layout_updates(update_rows: Dict[str, Dict[str, object]], message: st
 
 def _normalized_archive_reason(value: object) -> str:
     reason = _normalize_text(value)
-    return reason if reason in ARCHIVE_REASON_OPTIONS else "Other"
+    return reason or "Other"
+
+
+def _load_archive_reason_labels() -> List[str]:
+    catalog = load_label_catalog()
+    labels = list(catalog.get(LABEL_TYPE_ARCHIVE_REASON, []) or [])
+    return labels
+
+
+def _add_archive_reason_labels(values: Iterable[str]) -> bool:
+    cleaned_values = [_normalize_text(value) for value in list(values or [])]
+    new_values = {value for value in cleaned_values if value}
+    if not new_values:
+        return False
+
+    catalog = load_label_catalog()
+    current_values = set(catalog.get(LABEL_TYPE_ARCHIVE_REASON, []) or [])
+    merged_values = current_values | new_values
+    if merged_values == current_values:
+        return False
+
+    catalog[LABEL_TYPE_ARCHIVE_REASON] = sorted(merged_values, key=str.casefold)
+    write_label_catalog(catalog, LABEL_CATALOG_FILE)
+    return True
+
+
+def _resolve_archive_reason_options() -> List[str]:
+    archive_overrides = load_paper_archive_overrides(PAPER_ARCHIVE_OVERRIDES_FILE)
+    catalog_reasons = _load_archive_reason_labels() or list(DEFAULT_ARCHIVE_REASON_OPTIONS)
+    return resolve_archive_reason_options(catalog_reasons, archive_overrides)
 
 
 def _archive_paper(submission_id: str, archive_reason: str, archive_note: str) -> bool:
@@ -940,6 +970,37 @@ def _archive_paper(submission_id: str, archive_reason: str, archive_note: str) -
     write_paper_placements(placements.values(), PAPER_PLACEMENTS_FILE)
     _push_undo_snapshot(snapshot)
     _refresh_state(f"Archived {_paper_move_label(paper)} ({reason}).")
+    return True
+
+
+def _bulk_update_archived_reason(submission_ids: List[str], archive_reason: str) -> bool:
+    normalized_ids = [_normalize_text(sid) for sid in list(submission_ids or []) if _normalize_text(sid)]
+    if not normalized_ids:
+        return False
+
+    normalized_reason = _normalized_archive_reason(archive_reason)
+    archive_rows = load_paper_archive_overrides(PAPER_ARCHIVE_OVERRIDES_FILE)
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    changed = False
+    updated_count = 0
+    for sid in normalized_ids:
+        row = archive_rows.get(sid)
+        if row is None:
+            continue
+        if _normalize_text(row.get("ArchiveReason", "")) == normalized_reason:
+            continue
+        row["ArchiveReason"] = normalized_reason
+        row["UpdatedAt"] = now
+        changed = True
+        updated_count += 1
+
+    if not changed:
+        return False
+
+    snapshot = _snapshot_for_undo()
+    write_paper_archive_overrides(archive_rows.values(), PAPER_ARCHIVE_OVERRIDES_FILE)
+    _push_undo_snapshot(snapshot)
+    _refresh_state(f"Updated archive reason for {updated_count} archived paper(s).")
     return True
 
 
@@ -2759,27 +2820,40 @@ def _quality_panel(edited_count: int, not_edited_count: int) -> None:
     v = state.validations
 
     st.subheader("Checks")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Accepted papers", v.get("accepted_papers", 0))
-    c2.metric("Scheduled papers", v.get("scheduled_papers", 0))
-    c3.metric("Overflow papers", v.get("overflow_papers", 0))
-    c4.metric("Unassigned papers", v.get("unassigned_papers", 0))
-
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Edited papers", edited_count)
-    c6.metric("Not edited papers", not_edited_count)
-    c7.metric("Reserve slots", v.get("reserve_slots", 0))
-    c8.metric("Sessions", v.get("sessions", 0))
-
-    inactive_assigned = int(v.get("inactive_assigned_papers", 0) or 0)
-    inactive_overflow = int(v.get("inactive_overflow_papers", 0) or 0)
+    total_papers = int(v.get("total_papers", int(v.get("active_papers", 0) or 0) + int(v.get("archived_papers", 0) or 0)) or 0)
+    active_papers = int(v.get("active_papers", v.get("accepted_papers", 0)) or 0)
+    scheduled_active = int(v.get("scheduled_active_papers", v.get("scheduled_papers", 0)) or 0)
+    overflow_active = int(v.get("overflow_active_papers", v.get("overflow_papers", 0)) or 0)
+    scheduled_inactive = int(v.get("scheduled_in_inactive_sessions", 0) or 0)
+    overflow_inactive = int(v.get("overflow_in_inactive_sessions", v.get("inactive_overflow_papers", 0)) or 0)
+    unassigned_active = int(v.get("unassigned_active_papers", v.get("unassigned_papers", 0)) or 0)
     archived_count = int(v.get("archived_papers", 0) or 0)
     archived_by_reason = dict(v.get("archived_by_reason", {}) or {})
-    c9, c10, c11 = st.columns(3)
-    c9.metric("Inactive-assigned papers", inactive_assigned)
-    c10.metric("Inactive overflow papers", inactive_overflow)
-    c11.metric("Archived papers", archived_count)
-    if inactive_assigned > 0:
+    archived_by_previous_status = dict(v.get("archived_by_previous_status", {}) or {})
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total accepted papers", total_papers)
+    c2.metric("Active papers", active_papers)
+    c3.metric("Archived papers", archived_count)
+    st.caption("Total accepted papers = Active papers + Archived papers")
+
+    c4, c5, c6, c7, c8 = st.columns(5)
+    c4.metric("Scheduled in active sessions", scheduled_active)
+    c5.metric("Overflow in active sessions", overflow_active)
+    c6.metric("Scheduled in inactive sessions", scheduled_inactive)
+    c7.metric("Overflow in inactive sessions", overflow_inactive)
+    c8.metric("Unassigned", unassigned_active)
+    st.caption(
+        "Active papers = Scheduled(active) + Overflow(active) + Scheduled(inactive) + Overflow(inactive) + Unassigned"
+    )
+
+    c9, c10, c11, c12 = st.columns(4)
+    c9.metric("Edited papers", edited_count)
+    c10.metric("Not edited papers", not_edited_count)
+    c11.metric("Reserve slots", v.get("reserve_slots", 0))
+    c12.metric("Sessions", v.get("sessions", 0))
+
+    if scheduled_inactive > 0 or overflow_inactive > 0:
         st.info(
             "Some papers are assigned to inactive sessions. They stay stored for planning but are hidden from active programme views."
         )
@@ -2787,6 +2861,12 @@ def _quality_panel(edited_count: int, not_edited_count: int) -> None:
         reason_bits = [f"{reason}: {count}" for reason, count in sorted(archived_by_reason.items()) if int(count) > 0]
         if reason_bits:
             st.caption(f"Archived by reason: {', '.join(reason_bits)}")
+        status_bits = [
+            f"scheduled {int(archived_by_previous_status.get('scheduled', 0) or 0)}",
+            f"overflow {int(archived_by_previous_status.get('overflow', 0) or 0)}",
+            f"unassigned {int(archived_by_previous_status.get('unassigned', 0) or 0)}",
+        ]
+        st.caption(f"Archived from: {', '.join(status_bits)}")
 
     if v.get("hard_constraints_ok", False):
         st.success("Hard constraints are valid (session grid and forbidden blocks).")
@@ -2801,6 +2881,13 @@ def _quality_panel(edited_count: int, not_edited_count: int) -> None:
     with st.expander("Issue details", expanded=True):
         st.write(
             {
+                "total_papers": total_papers,
+                "active_papers": active_papers,
+                "scheduled_active_papers": scheduled_active,
+                "overflow_active_papers": overflow_active,
+                "scheduled_in_inactive_sessions": scheduled_inactive,
+                "overflow_in_inactive_sessions": overflow_inactive,
+                "unassigned_active_papers": unassigned_active,
                 "duplicate_submission_ids": v.get("duplicate_submission_ids", []),
                 "missing_submission_ids": v.get("missing_submission_ids", []),
                 "unassigned_submission_ids": v.get("unassigned_submission_ids", []),
@@ -2813,6 +2900,7 @@ def _quality_panel(edited_count: int, not_edited_count: int) -> None:
                 "archived_papers": v.get("archived_papers", 0),
                 "archived_submission_ids": v.get("archived_submission_ids", []),
                 "archived_by_reason": v.get("archived_by_reason", {}),
+                "archived_by_previous_status": v.get("archived_by_previous_status", {}),
                 "incomplete_sessions": v.get("incomplete_sessions", []),
                 "duplicate_session_codes": v.get("duplicate_session_codes", []),
                 "duplicate_session_slots": v.get("duplicate_session_slots", []),
@@ -3079,11 +3167,12 @@ def _render_archive_controls(paper: object, scope_prefix: str) -> bool:
         return False
 
     st.caption("Archive")
+    archive_reason_options = _resolve_archive_reason_options()
     reason_key = f"{scope_prefix}_archive_reason_{sid}"
     note_key = f"{scope_prefix}_archive_note_{sid}"
     reason = st.selectbox(
         "Archive reason",
-        ARCHIVE_REASON_OPTIONS,
+        archive_reason_options,
         key=reason_key,
     )
     note = st.text_area(
@@ -3572,6 +3661,8 @@ state = st.session_state.wic_state
 edited_ids = set(getattr(state, "edited_submission_ids", set()))
 edited_count = len([p for p in state.papers if p.submission_id in edited_ids])
 not_edited_count = len(state.papers) - edited_count
+archive_overrides = load_paper_archive_overrides(PAPER_ARCHIVE_OVERRIDES_FILE)
+archive_reason_options = resolve_archive_reason_options(_load_archive_reason_labels(), archive_overrides)
 mobile_mode = bool(st.session_state.get("mobile_mode", False))
 force_mobile_mode = st.session_state.get("force_mobile_mode")
 if force_mobile_mode is not None:
@@ -3749,13 +3840,18 @@ elif active_tab == "Paper List":
         apply_paper_metadata_edits_if_changed=_apply_paper_metadata_edits_if_changed,
         apply_paper_session_selection_edit=_apply_paper_session_selection_edit,
         apply_archive_paper=_archive_paper,
+        archive_reason_options=archive_reason_options,
         mobile_mode=mobile_mode,
     )
 elif active_tab == "Archived":
     render_archived_tab(
         state=state,
-        archive_overrides=load_paper_archive_overrides(PAPER_ARCHIVE_OVERRIDES_FILE),
+        archive_overrides=archive_overrides,
         restore_archived_paper=_restore_archived_paper,
+        archive_reason_options=archive_reason_options,
+        load_archive_reason_labels=_load_archive_reason_labels,
+        add_archive_reason_labels=_add_archive_reason_labels,
+        bulk_update_archived_reason=_bulk_update_archived_reason,
         mobile_mode=mobile_mode,
     )
 elif active_tab == "Labels":

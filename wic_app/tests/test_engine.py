@@ -692,6 +692,72 @@ class EngineTests(unittest.TestCase):
             self.assertIn(sid, [p.submission_id for p in state_restored.unassigned_papers])
             self.assertEqual(int(state_restored.validations.get("archived_papers", 0) or 0), 0)
 
+    def test_validation_exposes_disjoint_active_and_archived_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (PAPER_METADATA_OVERRIDES_FILE, "metadata"),
+                (PAPER_ARCHIVE_OVERRIDES_FILE, "archive"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            state = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            scheduled_paper = next((paper for paper in state.papers if str(paper.session_id).strip()), None)
+            self.assertIsNotNone(scheduled_paper)
+            sid = scheduled_paper.submission_id
+
+            write_paper_archive_overrides(
+                [
+                    {
+                        "SubmissionID": sid,
+                        "ArchiveReason": "Duplicate submission",
+                        "ArchiveNote": "",
+                        "ArchivedAt": "2026-04-03T10:00:00",
+                        "PreviousPlacementStatus": "scheduled",
+                        "PreviousSessionId": scheduled_paper.session_id,
+                        "PreviousTalkIndex": str(max(1, int(scheduled_paper.talk_index or 1))),
+                        "PreviousOverflowOrder": "",
+                    }
+                ],
+                paths["archive"],
+            )
+
+            state_after = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            validations = state_after.validations
+
+            self.assertEqual(
+                int(validations["total_papers"] or 0),
+                int(validations["active_papers"] or 0) + int(validations["archived_papers"] or 0),
+            )
+            self.assertEqual(
+                int(validations["active_papers"] or 0),
+                int(validations["scheduled_active_papers"] or 0)
+                + int(validations["overflow_active_papers"] or 0)
+                + int(validations["scheduled_in_inactive_sessions"] or 0)
+                + int(validations["overflow_in_inactive_sessions"] or 0)
+                + int(validations["unassigned_active_papers"] or 0),
+            )
+            self.assertEqual(
+                int((validations["archived_by_previous_status"] or {}).get("scheduled", 0) or 0),
+                1,
+            )
+            self.assertEqual(
+                int((validations["archived_by_previous_status"] or {}).get("overflow", 0) or 0),
+                0,
+            )
+            self.assertEqual(
+                int((validations["archived_by_previous_status"] or {}).get("unassigned", 0) or 0),
+                0,
+            )
+
     def test_assignment_to_inactive_session_is_tracked_as_inactive_assigned(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

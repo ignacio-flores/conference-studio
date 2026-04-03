@@ -25,6 +25,16 @@ class AppLayoutConfigTests(unittest.TestCase):
         self.assertIn("LABEL_CATALOG_FILE", text)
         self.assertIn("load_label_catalog_fn=load_label_catalog", text)
         self.assertIn("write_label_catalog_fn=write_label_catalog", text)
+        self.assertIn("Total accepted papers", text)
+        self.assertIn("Active papers", text)
+        self.assertIn("Archived papers", text)
+        self.assertIn("Total accepted papers = Active papers + Archived papers", text)
+        self.assertIn("Scheduled in active sessions", text)
+        self.assertIn("Overflow in inactive sessions", text)
+        self.assertIn(
+            "Active papers = Scheduled(active) + Overflow(active) + Scheduled(inactive) + Overflow(inactive) + Unassigned",
+            text,
+        )
         self.assertIn("EMPTY_LABEL_SENTINEL", text)
         self.assertIn("def _classification_override_value", text)
         self.assertIn("conference_label_draft", text)
@@ -32,6 +42,8 @@ class AppLayoutConfigTests(unittest.TestCase):
         self.assertIn("pills_widget = getattr(st, \"pills\", None)", text)
         self.assertIn('elif active_tab == "Archived":', text)
         self.assertIn("render_archived_tab(", text)
+        self.assertIn("archive_reason_options=archive_reason_options", text)
+        self.assertIn("bulk_update_archived_reason=_bulk_update_archived_reason", text)
         self.assertIn("def _init_viewport_state()", text)
         self.assertIn("MOBILE_QUERY_PARAM = \"mobile\"", text)
         self.assertIn("APP_PASSWORD_SETTING = \"APP_PASSWORD\"", text)

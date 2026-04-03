@@ -77,6 +77,51 @@ class LabelCatalogEngineTests(unittest.TestCase):
             )
             self.assertFalse(changed_again)
 
+    def test_write_and_load_catalog_supports_archive_reason_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            catalog_path = Path(tmpdir) / "label_catalog.csv"
+            write_label_catalog(
+                {
+                    LABEL_TYPE_PRIMARY: ["Theme A"],
+                    LABEL_TYPE_SECONDARY: ["Sub 1"],
+                    "archive_reason": ["Other", "Duplicate submission", "Other"],
+                },
+                catalog_path,
+            )
+
+            loaded = load_label_catalog(catalog_path)
+            self.assertEqual(loaded[LABEL_TYPE_PRIMARY], ["Theme A"])
+            self.assertEqual(loaded[LABEL_TYPE_SECONDARY], ["Sub 1"])
+            self.assertEqual(loaded.get("archive_reason"), ["Duplicate submission", "Other"])
+
+    def test_merge_catalog_adds_archive_reason_labels_without_touching_others(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            catalog_path = Path(tmpdir) / "label_catalog.csv"
+            write_label_catalog(
+                {
+                    LABEL_TYPE_PRIMARY: ["Theme A"],
+                    LABEL_TYPE_SECONDARY: ["Sub 1"],
+                    "archive_reason": ["Duplicate submission"],
+                },
+                catalog_path,
+            )
+
+            changed = merge_label_catalog_labels(
+                primary_values=["Theme A"],
+                secondary_values=["Sub 1"],
+                archive_reason_values=["Author cancelled attendance", "Duplicate submission", ""],
+                path=catalog_path,
+            )
+            self.assertTrue(changed)
+
+            loaded = load_label_catalog(catalog_path)
+            self.assertEqual(loaded[LABEL_TYPE_PRIMARY], ["Theme A"])
+            self.assertEqual(loaded[LABEL_TYPE_SECONDARY], ["Sub 1"])
+            self.assertEqual(
+                loaded.get("archive_reason"),
+                ["Author cancelled attendance", "Duplicate submission"],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -100,6 +100,7 @@ class PapersViewTests(unittest.TestCase):
         self.assertIn('"Target Session"', text)
         self.assertIn("apply_paper_session_selection_edit", text)
         self.assertIn("apply_archive_paper", text)
+        self.assertIn("archive_reason_options", text)
         self.assertIn('"Archive reason"', text)
         self.assertIn('"Archive Paper"', text)
         self.assertIn("mobile_mode: bool = False", text)
