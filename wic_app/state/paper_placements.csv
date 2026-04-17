@@ -3,7 +3,7 @@ SubmissionID,PlacementStatus,SessionId,TalkIndex,OverflowOrder,UpdatedAt
 0QDJvXQ,scheduled,37da9863-4612-5354-b833-fda2b2d1d2d4,2,,2026-04-16T17:23:12
 0QgvpgN,scheduled,cda98b9f-87ed-54b3-92c7-790687dc2106,4,,2026-04-16T17:35:12
 0QgyXB9,unassigned,,,,2026-04-17T10:14:44
-0Qyb44N,unassigned,,,,2026-04-03T09:26:00
+0Qyb44N,unassigned,,,,2026-04-17T15:11:10
 1AgYRRb,scheduled,ae11df5a-5c45-54a1-aeda-9cf5f855f737,4,,2026-04-16T17:59:22
 1Age6QL,scheduled,1d96e9ed-ae3b-5699-976b-48f927e48672,4,,2026-04-16T17:35:47
 1AxJ75M,scheduled,ad22a049-0377-59a2-be44-10f92dbc12d2,1,,2026-04-16T17:40:43
@@ -15,7 +15,7 @@ SubmissionID,PlacementStatus,SessionId,TalkIndex,OverflowOrder,UpdatedAt
 2EgVxqb,scheduled,611aa61f-0d61-560f-97f4-79d0862d0847,4,,2026-04-16T11:52:46
 2EgY8qL,scheduled,60ccb7da-0f57-5d46-8ed3-8debe06ec73e,4,,2026-04-16T17:50:22
 2Egzk19,scheduled,4aa8d497-3de4-514f-90d7-717d0d810645,3,,2026-03-13T15:42:17
-2EyMXEe,unassigned,,,,2026-04-03T09:25:42
+2EyMXEe,unassigned,,,,2026-04-17T14:50:27
 2EyQyyV,scheduled,611aa61f-0d61-560f-97f4-79d0862d0847,2,,2026-04-16T11:47:30
 44DEyOA,scheduled,047638b2-e25d-5208-a921-2bba9e84aef1,2,,2026-03-12T15:15:25
 44DRNBX,scheduled,c040ca03-5a2e-565d-b328-a889f0d6bd24,2,,2026-04-16T17:58:32
@@ -59,7 +59,7 @@ A7G1gLo,scheduled,68750050-01be-5c35-b256-29c008d72a94,4,,2026-04-16T17:36:33
 A7OD9ky,scheduled,1dfa0fde-83eb-5bb4-b138-46e1220a5bb0,1,,2026-03-25T16:21:05
 A7OGVKk,scheduled,338c97eb-78b3-5047-96db-d3656f18d647,1,,2026-04-14T15:23:59
 A7OGvQk,scheduled,8ad77046-2194-51d2-a4e6-158286fcbb70,1,,2026-04-16T17:39:47
-A7ONzke,unassigned,,,,2026-04-03T09:23:54
+A7ONzke,unassigned,,,,2026-04-17T15:02:54
 A7OOPE0,unassigned,,,,2026-04-03T09:23:36
 A7OY7j0,scheduled,c040ca03-5a2e-565d-b328-a889f0d6bd24,1,,2026-04-16T17:58:32
 A7OlqYl,scheduled,cda98b9f-87ed-54b3-92c7-790687dc2106,2,,2026-04-16T18:08:18
@@ -101,7 +101,7 @@ J9Zr2k7,scheduled,5cd277dc-236b-5446-90a9-91107748be21,1,,2026-03-13T15:45:39
 J9xP0gd,scheduled,37da9863-4612-5354-b833-fda2b2d1d2d4,3,,2026-04-16T17:23:40
 KYN4OW8,unassigned,,,,2026-04-03T09:20:35
 KYN4ovk,scheduled,fc078143-8b47-5477-92aa-5b10e01e9606,3,,2026-04-14T16:04:56
-KYNAvjD,unassigned,,,,2026-04-15T13:37:48
+KYNAvjD,unassigned,,,,2026-04-17T14:52:11
 KYNNdpX,scheduled,338c97eb-78b3-5047-96db-d3656f18d647,4,,2026-03-13T13:18:42
 KYNOVO7,scheduled,ad22a049-0377-59a2-be44-10f92dbc12d2,3,,2026-04-16T17:40:43
 KYNOoWg,scheduled,e563db19-44ce-54ff-819a-d0a9a42ec08d,2,,2026-04-16T17:14:32
@@ -235,7 +235,7 @@ ob1JeoM,unassigned,,,,2026-04-03T09:17:25
 ob1WyWO,scheduled,85079871-f72b-53f9-ada7-b5583da10de3,3,,2026-03-13T11:14:37
 ob1jKBM,scheduled,cccd4d03-347d-52b0-b665-32aa63eeffd8,2,,2026-04-17T13:57:12
 obQjNYb,unassigned,,,,2026-04-15T13:55:21
-obY68YO,unassigned,,,,2026-03-12T16:53:43
+obY68YO,unassigned,,,,2026-04-17T14:45:35
 obaEXbO,scheduled,8dac8193-1c28-5458-b3da-41a493b121bb,5,,2026-04-16T17:52:56
 obaQWR1,scheduled,1917c625-ce29-5625-8d12-7103451f1eff,4,,2026-03-25T15:58:22
 obaRReb,scheduled,c1d88216-5324-5a47-bdc7-da54ebf27b49,2,,2026-04-14T14:17:21
@@ -272,8 +272,8 @@ vGvx94g,scheduled,37da9863-4612-5354-b833-fda2b2d1d2d4,4,,2026-04-16T17:24:24
 xX6y5Xv,unassigned,,,,2026-04-15T13:42:01
 xXL7QXk,scheduled,0bf1aa12-2ee6-5327-bff9-6da25d94a416,4,,2026-04-17T11:08:21
 xXL7jBk,scheduled,e935d0b6-13cc-5def-b109-5ec23fdacf31,2,,2026-04-16T11:53:57
-xXLB87v,unassigned,,,,2026-04-03T09:16:17
-xXLBNeG,unassigned,,,,2026-04-03T09:15:14
+xXLB87v,unassigned,,,,2026-04-17T15:06:08
+xXLBNeG,unassigned,,,,2026-04-17T14:53:47
 xXLEDGy,scheduled,1dfa0fde-83eb-5bb4-b138-46e1220a5bb0,3,,2026-04-16T16:53:04
 xXLEbd9,scheduled,c39d5181-fe34-5d91-a10a-d23cd0855326,4,,2026-03-13T15:45:59
 xXLLlly,scheduled,611aa61f-0d61-560f-97f4-79d0862d0847,1,,2026-04-16T11:47:20
@@ -298,7 +298,11 @@ zxRbM51,scheduled,45494c18-33d0-5dd6-8146-6b7a6246f57b,2,,2026-03-12T13:06:36
 zxvBrNE,unassigned,,,,2026-04-03T09:12:56
 ASEntry1,scheduled,0bf1aa12-2ee6-5327-bff9-6da25d94a416,3,,2026-04-17T10:56:41
 ASEntry2,scheduled,1d96e9ed-ae3b-5699-976b-48f927e48672,2,,2026-03-13T11:51:54
-ASEntry3,unassigned,,,,2026-04-15T13:47:51
+ASEntry3,unassigned,,,,2026-04-17T15:00:19
 ASEntry4,scheduled,c040ca03-5a2e-565d-b328-a889f0d6bd24,5,,2026-04-17T10:46:28
 ASEntry5,unassigned,,,,2026-03-17T11:51:59
 ASEntry6,scheduled,deb4e105-4f8c-51f2-840e-fc0742ac3a57,4,,2026-03-13T10:51:50
+MANUAL-1465A4C5,unassigned,,,,2026-04-17T15:17:30
+MANUAL-1972E8DD,unassigned,,,,2026-04-17T14:48:00
+MANUAL-281724E2,unassigned,,,,2026-04-17T15:23:02
+MANUAL-46BE820D,unassigned,,,,2026-04-17T15:18:48
