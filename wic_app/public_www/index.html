@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conference Programme</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <main id="app">
+    <header class="site-header">
+      <div class="header-copy">
+        <p class="eyebrow">Conference Programme</p>
+        <h1 id="site-title">Conference Programme</h1>
+        <p id="site-subtitle" class="site-subtitle"></p>
+      </div>
+      <nav class="site-nav" aria-label="Primary">
+        <button type="button" class="nav-link is-active" data-view="programme">Programme</button>
+        <button type="button" class="nav-link" data-view="papers">Papers</button>
+        <a id="download-link" class="download-link" href="programme.xlsx">Download Excel</a>
+      </nav>
+    </header>
+
+    <section class="toolbar">
+      <div id="day-switcher" class="day-switcher" aria-label="Conference days"></div>
+      <p id="generated-at" class="generated-at"></p>
+    </section>
+
+    <section id="programme-view" class="view is-active" aria-label="Programme"></section>
+
+    <section id="papers-view" class="view" aria-label="Papers" hidden>
+      <div class="papers-controls">
+        <label class="search-label" for="paper-search">Search papers</label>
+        <input id="paper-search" class="paper-search" type="search" placeholder="Title, author, session">
+      </div>
+      <div id="papers-results" class="papers-results"></div>
+    </section>
+  </main>
+
+  <template id="session-detail-template">
+    <article class="session-card">
+      <button type="button" class="session-summary">
+        <div class="session-meta-row">
+          <span class="session-room"></span>
+          <span class="session-time"></span>
+        </div>
+        <h3 class="session-title"></h3>
+        <p class="session-meta"></p>
+      </button>
+      <div class="session-detail" hidden></div>
+    </article>
+  </template>
+
+  <template id="talk-row-template">
+    <article class="talk-row">
+      <button type="button" class="talk-toggle">
+        <span class="talk-title"></span>
+        <span class="talk-authors"></span>
+      </button>
+      <div class="abstract-panel" hidden></div>
+    </article>
+  </template>
+
+  <script src="assets/app.js" defer></script>
+</body>
+</html>

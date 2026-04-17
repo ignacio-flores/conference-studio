@@ -9,57 +9,53 @@ from exporters.publish import export_public_excel, export_public_payload
 APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
 PUBLIC_BUNDLE_DIR = REPO_ROOT / "public_bundle"
-PUBLIC_BUNDLE_WIC_APP_DIR = PUBLIC_BUNDLE_DIR / "wic_app"
-PUBLIC_BUNDLE_DATA_DIR = PUBLIC_BUNDLE_DIR / "public_data"
-
-PUBLIC_RUNTIME_FILES = [
-    "public_app.py",
-    "public_data.py",
-]
+PUBLIC_WWW_SOURCE_DIR = APP_DIR / "public_www"
 
 
 def _bundle_readme_text() -> str:
     return """# Conference Programme
 
-This folder is a self-contained public bundle generated from the private Conference Studio editor.
+This folder is a self-contained static public bundle generated from the private Conference Studio editor.
 
-Run locally:
+Upload the contents of `www/` to any standard static web host.
+
+Local preview:
 
 ```bash
-pip install -r requirements.txt
-export PUBLIC_ENABLED=true
-streamlit run wic_app/public_app.py
+cd www
+python3 -m http.server 8000
 ```
 
 Files:
 
-- `wic_app/public_app.py`: read-only Streamlit entrypoint
-- `public_data/programme.json`: public programme dataset
-- `public_data/programme.xlsx`: public workbook download
+- `www/index.html`: public site shell
+- `www/assets/`: static CSS and JavaScript
+- `www/data/programme.json`: public programme dataset
+- `www/programme.xlsx`: public workbook download
 
-This bundle is intended to be copied into a separate public repository.
+This bundle is intended to be copied into a separate public repository or uploaded directly to a static server.
 """
 
 
 def assemble_public_bundle(state, output_dir: Path = PUBLIC_BUNDLE_DIR) -> Path:
     output_dir = Path(output_dir).resolve()
-    bundle_wic_app_dir = output_dir / "wic_app"
-    bundle_data_dir = output_dir / "public_data"
+    bundle_www_dir = output_dir / "www"
+    bundle_assets_dir = bundle_www_dir / "assets"
+    bundle_data_dir = bundle_www_dir / "data"
 
     if output_dir.exists():
         shutil.rmtree(output_dir)
 
-    bundle_wic_app_dir.mkdir(parents=True, exist_ok=True)
+    bundle_assets_dir.mkdir(parents=True, exist_ok=True)
     bundle_data_dir.mkdir(parents=True, exist_ok=True)
 
-    for filename in PUBLIC_RUNTIME_FILES:
-        shutil.copy2(APP_DIR / filename, bundle_wic_app_dir / filename)
+    shutil.copy2(PUBLIC_WWW_SOURCE_DIR / "index.html", bundle_www_dir / "index.html")
+    shutil.copy2(PUBLIC_WWW_SOURCE_DIR / "assets" / "styles.css", bundle_assets_dir / "styles.css")
+    shutil.copy2(PUBLIC_WWW_SOURCE_DIR / "assets" / "app.js", bundle_assets_dir / "app.js")
 
     export_public_payload(state, bundle_data_dir / "programme.json")
-    export_public_excel(state, bundle_data_dir / "programme.xlsx")
+    export_public_excel(state, bundle_www_dir / "programme.xlsx")
 
-    requirements_src = APP_DIR / "requirements-public.txt"
-    shutil.copy2(requirements_src, output_dir / "requirements.txt")
     (output_dir / "README.md").write_text(_bundle_readme_text(), encoding="utf-8")
 
     return output_dir
