@@ -154,22 +154,30 @@ export PUBLIC_XLSX_PATH=/path/to/programme.xlsx
 If you want a separate public repository, use **Prepare Public Bundle** in the
 editor Actions menu. That generates a local `public_bundle/` folder with:
 
-- `wic_app/public_app.py`
-- `wic_app/public_data.py`
-- `public_data/programme.json`
-- `public_data/programme.xlsx`
-- `requirements.txt`
+- `www/index.html`
+- `www/assets/styles.css`
+- `www/assets/app.js`
+- `www/data/programme.json`
+- `www/programme.xlsx`
 - `README.md`
 
-`public_bundle/` is designed to work while isolated. Copy its contents into the
-separate public repo, commit there, and deploy that repo independently.
+`public_bundle/` is now a static site bundle. Upload the contents of `www/` to
+any standard static host, or preview it locally with:
+
+```bash
+cd public_bundle/www
+python3 -m http.server 8000
+```
+
+Copy the bundle into the separate public repo, commit there, and deploy that
+repo independently.
 
 ## Security notes
 
 - Do not publish `source_data/`, `exports/`, or `wic_app/state/`.
 - Do not publish this private repo directly; use `public_bundle/` or a cleaned public repo.
 - Do not store Streamlit secrets in git; keep `.streamlit/secrets.toml` local.
-- The public app is read-only by construction and should only be deployed with generated artifacts from `public_data/`.
+- The public bundle is read-only by construction and should only be deployed with generated artifacts from `public_bundle/www/`.
 - If this repository already contains sensitive tracked files from earlier local-only use, remove them from git before making the repository public.
 
 ## Optional branding

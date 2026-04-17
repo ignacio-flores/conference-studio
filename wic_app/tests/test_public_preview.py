@@ -17,9 +17,9 @@ class PublicPreviewTests(unittest.TestCase):
     def test_ensure_public_bundle_preview_starts_server_when_port_is_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             bundle_dir = Path(tmp) / "public_bundle"
-            app_path = bundle_dir / "wic_app" / "public_app.py"
+            app_path = bundle_dir / "www" / "index.html"
             app_path.parent.mkdir(parents=True, exist_ok=True)
-            app_path.write_text("print('ok')\n", encoding="utf-8")
+            app_path.write_text("<!doctype html><title>ok</title>\n", encoding="utf-8")
 
             with mock.patch("preview_public_bundle._is_local_port_open", return_value=False), mock.patch(
                 "preview_public_bundle.subprocess.Popen"
@@ -34,9 +34,9 @@ class PublicPreviewTests(unittest.TestCase):
     def test_ensure_public_bundle_preview_reuses_server_when_port_is_open(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             bundle_dir = Path(tmp) / "public_bundle"
-            app_path = bundle_dir / "wic_app" / "public_app.py"
+            app_path = bundle_dir / "www" / "index.html"
             app_path.parent.mkdir(parents=True, exist_ok=True)
-            app_path.write_text("print('ok')\n", encoding="utf-8")
+            app_path.write_text("<!doctype html><title>ok</title>\n", encoding="utf-8")
 
             with mock.patch("preview_public_bundle._is_local_port_open", return_value=True), mock.patch(
                 "preview_public_bundle.subprocess.Popen"

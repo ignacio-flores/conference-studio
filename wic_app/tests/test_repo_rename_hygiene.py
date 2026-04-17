@@ -34,11 +34,12 @@ class RepoRenameHygieneTests(unittest.TestCase):
     def test_readme_documents_public_release_flow(self) -> None:
         text = (REPO_ROOT / "wic_app" / "README.md").read_text(encoding="utf-8")
         self.assertIn("streamlit run wic_app/public_app.py", text)
-        self.assertIn("PUBLIC_ENABLED", text)
         self.assertIn("public_data/programme.json", text)
         self.assertIn("Dropbox", text)
         self.assertIn("public_bundle/", text)
         self.assertIn("Prepare Public Bundle", text)
+        self.assertIn("www/", text)
+        self.assertIn("http.server", text)
 
     def test_repo_does_not_track_virtualenv_directories(self) -> None:
         completed = subprocess.run(
