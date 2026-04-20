@@ -11,6 +11,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from runtime_compat import install_hashlib_usedforsecurity_compat
+
+install_hashlib_usedforsecurity_compat()
+
 from engine.config import load_conference_config
 from exporters.publish import (
     export_draft_workbook,

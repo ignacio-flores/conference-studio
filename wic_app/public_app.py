@@ -4,6 +4,10 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from runtime_compat import install_hashlib_usedforsecurity_compat
+
+install_hashlib_usedforsecurity_compat()
+
 import streamlit as st
 
 from public_data import PUBLIC_JSON_FILE, PUBLIC_XLSX_FILE, load_public_payload

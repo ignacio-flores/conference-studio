@@ -9,6 +9,10 @@ import re
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional
 
+from runtime_compat import install_hashlib_usedforsecurity_compat
+
+install_hashlib_usedforsecurity_compat()
+
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components

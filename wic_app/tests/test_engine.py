@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import shutil
 import sys
 import tempfile
+import types
 import unittest
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 if str(APP_ROOT) not in sys.path:
@@ -65,6 +68,74 @@ from reclassification_engine import (
 
 
 class EngineTests(unittest.TestCase):
+    def _simple_publish_state(self) -> SimpleNamespace:
+        paper_1 = SimpleNamespace(
+            submission_id="P1",
+            full_name="Presenter One",
+            title="Title One",
+            abstract="Abstract One",
+            link_to_pdf="https://example.org/p1.pdf",
+            primary_theme="Theme A",
+            detailed_subtheme="Subtheme A",
+            session_code="S1",
+            session_title="Session One",
+            day_label="Day 1 (4th June)",
+            day_num=1,
+            time="10h00-11h00",
+            block_label="SESSION 1",
+            block_num=1,
+            room="R1",
+        )
+        paper_2 = SimpleNamespace(
+            submission_id="P2",
+            full_name="Presenter Two",
+            title="Title Two",
+            abstract="Abstract Two",
+            link_to_pdf="https://example.org/p2.pdf",
+            primary_theme="Theme B",
+            detailed_subtheme="Subtheme B",
+            session_code="S1",
+            session_title="Session One",
+            day_label="Day 1 (4th June)",
+            day_num=1,
+            time="10h00-11h00",
+            block_label="SESSION 1",
+            block_num=1,
+            room="R1",
+        )
+        session = SimpleNamespace(
+            session_id="S1",
+            session_code="S1",
+            day_label="Day 1 (4th June)",
+            day_num=1,
+            time="10h00-11h00",
+            block_label="SESSION 1",
+            block_num=1,
+            room="R1",
+            start_min=600,
+            end_min=660,
+            capacity=2,
+            session_title="Session One",
+            primary_theme="Theme A",
+            subtheme="Subtheme A",
+            papers=[paper_1, paper_2],
+            overflow_papers=[],
+        )
+        return SimpleNamespace(
+            papers=[paper_1, paper_2],
+            sessions=[session],
+            inactive_sessions=[],
+            unassigned_papers=[],
+            slot_conflicts=[],
+            validations={
+                "scheduled_papers": 2,
+                "overflow_papers": 0,
+                "unassigned_papers": 0,
+                "reserve_slots": 0,
+                "accepted_papers": 2,
+            },
+        )
+
     def _temp_state_paths(self, root: Path) -> dict:
         state_dir = root / "state"
         state_dir.mkdir(parents=True, exist_ok=True)
@@ -210,6 +281,109 @@ class EngineTests(unittest.TestCase):
                 return
             self.assertTrue(publish_pdf_path.exists())
             self.assertGreater(publish_pdf_path.stat().st_size, 0)
+
+    def test_publish_workbook_is_session_centered_without_theme_or_link_metadata(self) -> None:
+        state = self._simple_publish_state()
+        with tempfile.TemporaryDirectory() as tmp:
+            publish_xlsx_path = export_publish_excel(state, Path(tmp) / "publish.xlsx")
+
+            with zipfile.ZipFile(publish_xlsx_path) as archive:
+                workbook_xml = "\n".join(
+                    archive.read(name).decode("utf-8", errors="ignore")
+                    for name in archive.namelist()
+                    if name.endswith(".xml") or name.endswith(".rels")
+                )
+
+        self.assertNotIn("PrimaryTheme", workbook_xml)
+        self.assertNotIn("Subtheme", workbook_xml)
+        self.assertNotIn("LinkToPDF", workbook_xml)
+        self.assertNotIn("Publish Programme", workbook_xml)
+        self.assertNotIn("This publish workbook contains schedule-ready information without abstract body text.", workbook_xml)
+        self.assertNotIn("<hyperlink", workbook_xml)
+        self.assertNotIn("https://example.org", workbook_xml)
+        self.assertNotIn("10h00-10h30", workbook_xml)
+        self.assertNotIn("10h30-11h00", workbook_xml)
+        self.assertNotIn("10:00-10:30", workbook_xml)
+        self.assertNotIn("10:30-11:00", workbook_xml)
+        self.assertIn("10h00-11h00", workbook_xml)
+        self.assertIn("Title One", workbook_xml)
+        self.assertLess(workbook_xml.index("Title One"), workbook_xml.index("Presenter One"))
+        self.assertNotIn("Presenter One - Title One", workbook_xml)
+
+    def test_publish_pdf_starts_with_sessions_and_omits_theme_and_link_metadata(self) -> None:
+        state = self._simple_publish_state()
+        captured_story = []
+
+        class FakeColors(types.SimpleNamespace):
+            black = "#000000"
+
+            @staticmethod
+            def HexColor(value: str) -> str:
+                return value
+
+        class FakeParagraphStyle:
+            def __init__(self, name: str, **kwargs) -> None:
+                self.name = name
+                self.kwargs = kwargs
+
+        class FakeParagraph:
+            def __init__(self, text: str, _style) -> None:
+                self.text = text
+
+            def getPlainText(self) -> str:
+                return re.sub(r"<[^>]+>", "", self.text)
+
+        class CapturingDoc:
+            def __init__(self, filename: str, **_kwargs) -> None:
+                self.filename = filename
+
+            def build(self, story) -> None:
+                captured_story.extend(story)
+                Path(self.filename).write_bytes(b"%PDF-FAKE")
+
+        fake_modules = {
+            "reportlab": types.ModuleType("reportlab"),
+            "reportlab.lib": types.ModuleType("reportlab.lib"),
+            "reportlab.lib.colors": FakeColors(),
+            "reportlab.lib.pagesizes": types.SimpleNamespace(A4=(595, 842)),
+            "reportlab.lib.styles": types.SimpleNamespace(
+                ParagraphStyle=FakeParagraphStyle,
+                getSampleStyleSheet=lambda: {
+                    "Title": FakeParagraphStyle("Title"),
+                    "Heading2": FakeParagraphStyle("Heading2"),
+                    "Normal": FakeParagraphStyle("Normal"),
+                },
+            ),
+            "reportlab.lib.units": types.SimpleNamespace(mm=1),
+            "reportlab.platypus": types.SimpleNamespace(
+                PageBreak=lambda: SimpleNamespace(kind="PageBreak"),
+                Paragraph=FakeParagraph,
+                SimpleDocTemplate=CapturingDoc,
+                Spacer=lambda *_args: SimpleNamespace(kind="Spacer"),
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(sys.modules, fake_modules):
+                publish_pdf_path = export_publish_pdf(state, Path(tmp) / "publish.pdf", branding_config_path=None)
+                self.assertTrue(publish_pdf_path.exists())
+
+        paragraph_text = "\n".join(
+            item.getPlainText() for item in captured_story if hasattr(item, "getPlainText")
+        )
+        paragraph_markup = "\n".join(
+            item.text for item in captured_story if hasattr(item, "text")
+        )
+        self.assertNotIn("Timetable", paragraph_text)
+        self.assertNotIn("Theme:", paragraph_text)
+        self.assertNotIn("PDF link", paragraph_text)
+        self.assertNotIn("Publish Programme", paragraph_text)
+        self.assertNotIn("This publish PDF lists sessions and presentations", paragraph_text)
+        self.assertNotIn("S1 |", paragraph_text)
+        self.assertIn("Session Booklet", paragraph_text)
+        self.assertIn("<b>Session One</b>", paragraph_markup)
+        self.assertIn("Title One", paragraph_text)
+        self.assertLess(paragraph_text.index("Title One"), paragraph_text.index("Presenter One"))
 
     def test_session_lifecycle_clear_remove_restore_create_add_room(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

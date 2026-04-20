@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import html
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -59,6 +60,45 @@ def _build_agenda_cell(session) -> str:
     if session.overflow_papers:
         lines.append(f"Overflow: {len(session.overflow_papers)}")
     return "\n".join(lines)
+
+
+def _paper_title_and_presenter(paper) -> Tuple[str, str]:
+    if paper is None:
+        return "[Reserve slot]", ""
+    title = str(getattr(paper, "title", "") or "").strip() or "[Untitled]"
+    presenter = str(getattr(paper, "full_name", "") or "").strip() or "[No presenter]"
+    return title, presenter
+
+
+def _write_title_presenter_cell(ws, row: int, col: int, paper, cell_fmt, presenter_fmt) -> None:
+    title, presenter = _paper_title_and_presenter(paper)
+    if not presenter:
+        ws.write(row, col, title, cell_fmt)
+        return
+    ws.write_rich_string(row, col, title, "\n", presenter_fmt, presenter, cell_fmt)
+
+
+def _write_session_programme_cell(ws, row: int, col: int, session, cell_fmt, presenter_fmt, session_fmt) -> None:
+    if session is None:
+        ws.write(row, col, "", cell_fmt)
+        return
+
+    if not getattr(session, "papers", []):
+        ws.write(row, col, f"{session.session_code} | {session.session_title}", cell_fmt)
+        return
+
+    fragments: List[object] = [
+        session_fmt,
+        f"{session.session_code} | {session.session_title}",
+    ]
+    for paper in session.papers:
+        title, presenter = _paper_title_and_presenter(paper)
+        fragments.extend(["\n\n", title])
+        if presenter:
+            fragments.extend(["\n", presenter_fmt, presenter])
+    if getattr(session, "overflow_papers", None):
+        fragments.append(f"\n\nOverflow: {len(session.overflow_papers)}")
+    ws.write_rich_string(row, col, *fragments, cell_fmt)
 
 
 def _ordered_day_labels_from_state(state: ProgrammeState) -> List[str]:
@@ -194,6 +234,74 @@ def _write_day_sheet(
                 col_idx,
                 f"{session.primary_theme}\n{session.subtheme}",
                 fmts["small_note_wrap"],
+            )
+        row += 2
+
+
+def _write_publish_day_sheet(
+    ws,
+    day_name: str,
+    day_blocks: Dict[Tuple[int, str, str], Dict[str, object]],
+    fmts: Dict[str, object],
+) -> None:
+    rooms = sorted(
+        {room for room_map in day_blocks.values() for room in room_map.keys()},
+        key=room_sort_key,
+    )
+
+    ws.set_column(0, 0, 18)
+    ws.set_column(1, max(1, len(rooms)), 58)
+    ws.freeze_panes(2, 1)
+
+    row = 0
+    ws.merge_range(
+        row,
+        0,
+        row,
+        max(1, len(rooms)),
+        f"{day_name} | session schedule",
+        fmts["day_title"],
+    )
+    row += 1
+    ws.write(row, 0, "Session time", fmts["header"])
+    for col_idx, room in enumerate(rooms, start=1):
+        ws.write(row, col_idx, room, fmts["header"])
+    row += 1
+
+    for block_key in sorted(day_blocks.keys(), key=lambda x: x[0]):
+        _, time_label, block_label = block_key
+        room_records = day_blocks[block_key]
+        sessions_in_block = [session for session in room_records.values() if session is not None]
+        if sessions_in_block:
+            starts = [_session_block_bounds(session)[0] for session in sessions_in_block]
+            ends = [_session_block_bounds(session)[1] for session in sessions_in_block]
+            block_start = min(starts)
+            block_end = max(ends)
+            time_display = f"{format_minutes(block_start)}-{format_minutes(block_end)}"
+        else:
+            time_display = time_label
+        ws.merge_range(
+            row,
+            0,
+            row,
+            max(1, len(rooms)),
+            f"{block_label} | {time_display}",
+            fmts["block"],
+        )
+        row += 1
+
+        max_papers = max((len(getattr(session, "papers", [])) for session in sessions_in_block), default=1)
+        ws.set_row(row, max(88, 34 + max_papers * 38))
+        ws.write(row, 0, time_display, fmts["time"])
+        for col_idx, room in enumerate(rooms, start=1):
+            _write_session_programme_cell(
+                ws,
+                row,
+                col_idx,
+                room_records.get(room),
+                fmts["wrap"],
+                fmts["presenter_text"],
+                fmts["session_text"],
             )
         row += 2
 
@@ -580,8 +688,8 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
     wb = xlsxwriter.Workbook(str(output_path))
     conference = load_conference_config()
 
-    header_fmt = wb.add_format({"bold": True, "bg_color": "#E8EEF8", "border": 1, "valign": "top"})
-    cell_fmt = wb.add_format({"border": 1, "valign": "top"})
+    header_fmt = wb.add_format({"bold": True, "bg_color": "#E8EEF8", "border": 1, "valign": "top", "text_wrap": True})
+    cell_fmt = wb.add_format({"border": 1, "valign": "top", "text_wrap": True})
     wrap_fmt = wb.add_format({"border": 1, "valign": "top", "text_wrap": True})
     day_title_fmt = wb.add_format(
         {"bold": True, "bg_color": "#C9DAF8", "border": 1, "align": "left", "valign": "vcenter"}
@@ -589,47 +697,44 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
     block_fmt = wb.add_format(
         {"bold": True, "bg_color": "#DFE8F7", "border": 1, "align": "left", "valign": "vcenter"}
     )
-    time_fmt = wb.add_format({"bold": True, "bg_color": "#F4F7FC", "border": 1})
-    reserve_fmt = wb.add_format({"border": 1, "italic": True, "font_color": "#7A4E00"})
-    url_fmt = wb.add_format({"font_color": "blue", "underline": 1, "border": 1, "valign": "top", "text_wrap": True})
+    time_fmt = wb.add_format({"bold": True, "bg_color": "#F4F7FC", "border": 1, "text_wrap": True})
+    reserve_fmt = wb.add_format({"border": 1, "italic": True, "font_color": "#7A4E00", "text_wrap": True, "valign": "top"})
+    presenter_text_fmt = wb.add_format({"font_color": "#666666", "italic": True})
+    session_text_fmt = wb.add_format({"bold": True})
 
     fmts = {
         "header": header_fmt,
         "cell": cell_fmt,
         "wrap": wrap_fmt,
         "reserve": reserve_fmt,
-        "url_wrap": url_fmt,
         "small_note": wrap_fmt,
         "small_note_wrap": wrap_fmt,
         "block": block_fmt,
         "day_title": day_title_fmt,
         "time": time_fmt,
+        "presenter_text": presenter_text_fmt,
+        "session_text": session_text_fmt,
     }
 
     ws_cover = wb.add_worksheet("Cover")
     ws_cover.set_column(0, 0, 90)
     ws_cover.write(0, 0, conference.conference_title, wb.add_format({"bold": True, "font_size": 20}))
-    ws_cover.write(2, 0, conference.conference_subtitle, wb.add_format({"bold": True, "font_size": 14}))
-    ws_cover.write(4, 0, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    ws_cover.write(6, 0, "This publish workbook contains schedule-ready information without abstract body text.")
-    ws_cover.write(8, 0, f"Scheduled papers: {state.validations.get('scheduled_papers', 0)}")
-    ws_cover.write(9, 0, f"Overflow papers: {state.validations.get('overflow_papers', 0)}")
-    ws_cover.write(10, 0, f"Unassigned papers: {state.validations.get('unassigned_papers', 0)}")
+    ws_cover.write(2, 0, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    ws_cover.write(4, 0, f"Scheduled papers: {state.validations.get('scheduled_papers', 0)}")
+    ws_cover.write(5, 0, f"Overflow papers: {state.validations.get('overflow_papers', 0)}")
+    ws_cover.write(6, 0, f"Unassigned papers: {state.validations.get('unassigned_papers', 0)}")
 
-    paper_row_lookup_map = paper_row_lookup(state)
     day_blocks = group_sessions_by_day_block(state)
     ordered_days = _ordered_day_labels_from_state(state)
 
     used_sheet_names = {"Cover", "Session Directory", "Paper Index", "Issues"}
     for day_idx, day_name in enumerate(ordered_days, start=1):
         ws_day = wb.add_worksheet(_safe_sheet_name(f"Day {day_idx}", used_sheet_names))
-        _write_day_sheet(
+        _write_publish_day_sheet(
             ws_day,
             day_name,
             day_blocks.get(day_name, {}),
-            paper_row_lookup_map,
             fmts,
-            include_comments=False,
         )
 
     ws_sessions = wb.add_worksheet("Session Directory")
@@ -646,8 +751,6 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
         "Room",
         "Capacity",
         "SessionTitle",
-        "PrimaryTheme",
-        "Subtheme",
     ]
     for talk_idx in range(1, max_capacity + 1):
         session_headers.append(f"Talk{talk_idx}")
@@ -655,12 +758,13 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
     ws_sessions.freeze_panes(1, 0)
     ws_sessions.set_column(0, 0, 16)
     ws_sessions.set_column(1, 4, 18)
-    ws_sessions.set_column(5, 8, 40)
+    ws_sessions.set_column(5, 6, 40)
     for talk_idx in range(max_capacity):
-        col_idx = 9 + talk_idx
+        col_idx = 7 + talk_idx
         ws_sessions.set_column(col_idx, col_idx, 52)
 
     for row_idx, session in enumerate(ordered_sessions, start=1):
+        ws_sessions.set_row(row_idx, 54)
         ws_sessions.write(row_idx, 0, session.session_code, cell_fmt)
         ws_sessions.write(row_idx, 1, session.day_label, cell_fmt)
         ws_sessions.write(row_idx, 2, session.time, cell_fmt)
@@ -668,53 +772,55 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
         ws_sessions.write(row_idx, 4, session.room, cell_fmt)
         ws_sessions.write(row_idx, 5, max(1, int(getattr(session, "capacity", len(session.papers) or 1))), cell_fmt)
         ws_sessions.write(row_idx, 6, session.session_title, wrap_fmt)
-        ws_sessions.write(row_idx, 7, session.primary_theme, wrap_fmt)
-        ws_sessions.write(row_idx, 8, session.subtheme, wrap_fmt)
         for talk_idx in range(max_capacity):
             paper = session.papers[talk_idx] if talk_idx < len(session.papers) else None
-            talk_col = 9 + talk_idx
+            talk_col = 7 + talk_idx
             if paper is None:
                 ws_sessions.write(row_idx, talk_col, "[Reserve slot]", reserve_fmt)
             else:
-                ws_sessions.write(row_idx, talk_col, f"{paper.full_name} - {paper.title}", wrap_fmt)
+                _write_title_presenter_cell(
+                    ws_sessions,
+                    row_idx,
+                    talk_col,
+                    paper,
+                    wrap_fmt,
+                    presenter_text_fmt,
+                )
 
     ws_papers = wb.add_worksheet("Paper Index")
     paper_headers = [
         "SubmissionID",
-        "Presenter",
-        "Title",
+        "Paper",
         "SessionCode",
         "SessionTitle",
         "Day",
         "Time",
         "Room",
-        "PrimaryTheme",
-        "Subtheme",
-        "LinkToPDF",
     ]
     ws_papers.write_row(0, 0, paper_headers, header_fmt)
     ws_papers.freeze_panes(1, 0)
-    ws_papers.set_column(0, 1, 18)
-    ws_papers.set_column(2, 2, 52)
-    ws_papers.set_column(3, 4, 20)
-    ws_papers.set_column(5, 9, 22)
-    ws_papers.set_column(10, 10, 54)
+    ws_papers.set_column(0, 0, 18)
+    ws_papers.set_column(1, 1, 62)
+    ws_papers.set_column(2, 3, 22)
+    ws_papers.set_column(4, 6, 22)
+    ws_papers.set_column(7, 7, 18)
 
     for row_idx, paper in enumerate(sorted(state.papers, key=lambda p: p.submission_id), start=1):
+        ws_papers.set_row(row_idx, 48)
         ws_papers.write(row_idx, 0, paper.submission_id, cell_fmt)
-        ws_papers.write(row_idx, 1, paper.full_name, cell_fmt)
-        ws_papers.write(row_idx, 2, paper.title, wrap_fmt)
-        ws_papers.write(row_idx, 3, paper.session_code, cell_fmt)
-        ws_papers.write(row_idx, 4, paper.session_title, wrap_fmt)
-        ws_papers.write(row_idx, 5, paper.day_label, cell_fmt)
-        ws_papers.write(row_idx, 6, paper.time, cell_fmt)
-        ws_papers.write(row_idx, 7, paper.room, cell_fmt)
-        ws_papers.write(row_idx, 8, paper.primary_theme, wrap_fmt)
-        ws_papers.write(row_idx, 9, paper.detailed_subtheme, wrap_fmt)
-        if paper.link_to_pdf.startswith("http"):
-            ws_papers.write_url(row_idx, 10, paper.link_to_pdf, url_fmt, string="Open PDF")
-        else:
-            ws_papers.write(row_idx, 10, paper.link_to_pdf, wrap_fmt)
+        _write_title_presenter_cell(
+            ws_papers,
+            row_idx,
+            1,
+            paper,
+            wrap_fmt,
+            presenter_text_fmt,
+        )
+        ws_papers.write(row_idx, 2, paper.session_code, cell_fmt)
+        ws_papers.write(row_idx, 3, paper.session_title, wrap_fmt)
+        ws_papers.write(row_idx, 4, paper.day_label, cell_fmt)
+        ws_papers.write(row_idx, 5, paper.time, cell_fmt)
+        ws_papers.write(row_idx, 6, paper.room, cell_fmt)
 
     ws_issues = wb.add_worksheet("Issues")
     ws_issues.freeze_panes(1, 0)
@@ -843,8 +949,6 @@ def export_publish_pdf(
             Paragraph,
             SimpleDocTemplate,
             Spacer,
-            Table,
-            TableStyle,
         )
     except ModuleNotFoundError as exc:
         raise RuntimeError(
@@ -900,12 +1004,9 @@ def export_publish_pdf(
 
     story = []
     story.append(Paragraph(branding["conference_title"], title_style))
-    story.append(Paragraph(branding["conference_subtitle"], subtitle_style))
     story.append(Spacer(1, 6 * mm))
     story.append(Paragraph(f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
-    story.append(Spacer(1, 8 * mm))
-    story.append(Paragraph("This publish PDF includes timetable and session booklet views (no abstract body text).", small_style))
-    story.append(PageBreak())
+    story.append(Spacer(1, 6 * mm))
 
     ordered_sessions = sorted(
         state.sessions,
@@ -913,59 +1014,6 @@ def export_publish_pdf(
     )
     ordered_days = _ordered_day_labels_from_state(state)
 
-    story.append(Paragraph("Timetable", section_style))
-    for day_name in ordered_days:
-        story.append(Paragraph(day_name, subtitle_style))
-
-        table_rows = [["Time", "Room", "Session", "Presenter", "Paper Title"]]
-        for session in [s for s in ordered_sessions if s.day_label == day_name]:
-            slot_ranges = _session_slot_ranges(session)
-            for idx, paper in enumerate(session.papers):
-                if idx < len(slot_ranges):
-                    slot_start_min, slot_end_min = slot_ranges[idx]
-                else:
-                    slot_start_min, slot_end_min = _session_block_bounds(session)
-                slot_start = format_minutes(slot_start_min)
-                slot_end = format_minutes(slot_end_min)
-                if paper is None:
-                    table_rows.append([
-                        f"{slot_start}-{slot_end}",
-                        session.room,
-                        session.session_code,
-                        "[Reserve slot]",
-                        "[Reserve slot]",
-                    ])
-                else:
-                    table_rows.append([
-                        f"{slot_start}-{slot_end}",
-                        session.room,
-                        session.session_code,
-                        paper.full_name,
-                        paper.title,
-                    ])
-
-        timetable = Table(
-            table_rows,
-            colWidths=[24 * mm, 20 * mm, 26 * mm, 42 * mm, 74 * mm],
-            repeatRows=1,
-        )
-        timetable.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF8")),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#6A6A6A")),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 8.5),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 3),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-                ]
-            )
-        )
-        story.append(timetable)
-        story.append(Spacer(1, 6 * mm))
-
-    story.append(PageBreak())
     story.append(Paragraph("Session Booklet", section_style))
 
     for day_name in ordered_days:
@@ -975,14 +1023,9 @@ def export_publish_pdf(
         for session in day_sessions:
             story.append(
                 Paragraph(
-                    f"<b>{session.session_code}</b> | {session.time} | {session.room} | {session.session_title}",
+                    f"<b>{html.escape(session.session_title)}</b> | "
+                    f"{html.escape(session.time)} | {html.escape(session.room)}",
                     styles["Normal"],
-                )
-            )
-            story.append(
-                Paragraph(
-                    f"Theme: {session.primary_theme} | Subtheme: {session.subtheme}",
-                    small_style,
                 )
             )
 
@@ -990,13 +1033,11 @@ def export_publish_pdf(
                 if paper is None:
                     story.append(Paragraph(f"{idx}. [Reserve slot]", small_style))
                     continue
-                if paper.link_to_pdf.startswith("http"):
-                    link_text = f"<link href='{paper.link_to_pdf}'>PDF link</link>"
-                else:
-                    link_text = "PDF link unavailable"
+                title, presenter = _paper_title_and_presenter(paper)
                 story.append(
                     Paragraph(
-                        f"{idx}. {paper.full_name} - {paper.title} ({link_text})",
+                        f"{idx}. {html.escape(title)} "
+                        f"<font color='#666666'><i>{html.escape(presenter)}</i></font>",
                         small_style,
                     )
                 )
