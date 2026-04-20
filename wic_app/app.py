@@ -19,7 +19,7 @@ import streamlit.components.v1 as components
 
 from bundle_public_app import assemble_public_bundle
 from engine.config import load_conference_config
-from exporters.publish import export_draft_workbook, export_publish_excel, export_publish_pdf
+from exporters.publish import export_publish_docx, export_publish_excel, export_publish_pdf
 from preview_public_bundle import ensure_public_bundle_preview
 from reclassification_engine import (
     CLASSIFICATION_OVERRIDES_FILE,
@@ -3765,9 +3765,10 @@ if mobile_mode:
         refresh_state=_refresh_state,
         export_publish_excel=export_publish_excel,
         export_publish_pdf=export_publish_pdf,
-        export_draft_workbook=export_draft_workbook,
+        export_publish_docx=export_publish_docx,
         publish_public_bundle=_publish_public_bundle,
         preview_public_bundle=_preview_public_bundle,
+        export_draft_workbook=None,
     )
 else:
     nav_col, actions_col = st.columns([5.2, 1.8], gap="small")
@@ -3805,9 +3806,10 @@ else:
             refresh_state=_refresh_state,
             export_publish_excel=export_publish_excel,
             export_publish_pdf=export_publish_pdf,
-            export_draft_workbook=export_draft_workbook,
+            export_publish_docx=export_publish_docx,
             publish_public_bundle=_publish_public_bundle,
             preview_public_bundle=_preview_public_bundle,
+            export_draft_workbook=None,
         )
 
 active_tab = _normalize_text(st.session_state.get("active_tab", TAB_LABELS[0]))

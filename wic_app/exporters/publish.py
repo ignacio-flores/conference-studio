@@ -17,6 +17,7 @@ from reclassification_engine import (
     DAY_ORDER,
     DRAFT_OUTPUT_FILE,
     EXPORT_DIR,
+    PUBLISH_DOCX_FILE,
     PUBLISH_PDF_FILE,
     PUBLISH_XLSX_FILE,
     ProgrammeState,
@@ -24,6 +25,11 @@ from reclassification_engine import (
     parse_start_minutes,
     room_sort_key,
 )
+
+PLENARY_PROGRAMME_URL = "https://inequalitylab.world/www-site/uploads/2026/04/2026-WIC-Programme.pdf"
+PLENARY_PROGRAMME_LINK_TEXT = "plenary sessions programme"
+PARALLEL_SESSIONS_DISCLAIMER_PREFIX = "This programme covers parallel sessions only. For plenary sessions, see the "
+PARALLEL_SESSIONS_DISCLAIMER = f"{PARALLEL_SESSIONS_DISCLAIMER_PREFIX}{PLENARY_PROGRAMME_LINK_TEXT}."
 
 
 def _session_slot_ranges(session) -> List[Tuple[int, int]]:
@@ -70,6 +76,23 @@ def _paper_title_and_presenter(paper) -> Tuple[str, str]:
     return title, presenter
 
 
+def _session_presentation_papers(session) -> List[object]:
+    scheduled = list(getattr(session, "papers", []) or [])
+    reserves = [paper for paper in scheduled if paper is None]
+    presentations = [paper for paper in scheduled if paper is not None]
+    presentations.extend(list(getattr(session, "overflow_papers", []) or []))
+    presentations.extend(reserves)
+    return presentations
+
+
+def _publish_sessions_by_day(state: ProgrammeState) -> Tuple[List[object], List[str]]:
+    ordered_sessions = sorted(
+        state.sessions,
+        key=lambda s: (s.day_num, parse_start_minutes(s.time), room_sort_key(s.room)),
+    )
+    return ordered_sessions, _ordered_day_labels_from_state(state)
+
+
 def _write_title_presenter_cell(ws, row: int, col: int, paper, cell_fmt, presenter_fmt) -> None:
     title, presenter = _paper_title_and_presenter(paper)
     if not presenter:
@@ -83,7 +106,8 @@ def _write_session_programme_cell(ws, row: int, col: int, session, cell_fmt, pre
         ws.write(row, col, "", cell_fmt)
         return
 
-    if not getattr(session, "papers", []):
+    presentation_papers = _session_presentation_papers(session)
+    if not presentation_papers:
         ws.write(row, col, f"{session.session_code} | {session.session_title}", cell_fmt)
         return
 
@@ -91,13 +115,11 @@ def _write_session_programme_cell(ws, row: int, col: int, session, cell_fmt, pre
         session_fmt,
         f"{session.session_code} | {session.session_title}",
     ]
-    for paper in session.papers:
+    for paper in presentation_papers:
         title, presenter = _paper_title_and_presenter(paper)
         fragments.extend(["\n\n", title])
         if presenter:
             fragments.extend(["\n", presenter_fmt, presenter])
-    if getattr(session, "overflow_papers", None):
-        fragments.append(f"\n\nOverflow: {len(session.overflow_papers)}")
     ws.write_rich_string(row, col, *fragments, cell_fmt)
 
 
@@ -290,7 +312,7 @@ def _write_publish_day_sheet(
         )
         row += 1
 
-        max_papers = max((len(getattr(session, "papers", [])) for session in sessions_in_block), default=1)
+        max_papers = max((len(_session_presentation_papers(session)) for session in sessions_in_block), default=1)
         ws.set_row(row, max(88, 34 + max_papers * 38))
         ws.write(row, 0, time_display, fmts["time"])
         for col_idx, room in enumerate(rooms, start=1):
@@ -701,6 +723,7 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
     reserve_fmt = wb.add_format({"border": 1, "italic": True, "font_color": "#7A4E00", "text_wrap": True, "valign": "top"})
     presenter_text_fmt = wb.add_format({"font_color": "#666666", "italic": True})
     session_text_fmt = wb.add_format({"bold": True})
+    link_fmt = wb.add_format({"font_color": "blue", "underline": 1, "text_wrap": True, "valign": "top"})
 
     fmts = {
         "header": header_fmt,
@@ -720,9 +743,16 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
     ws_cover.set_column(0, 0, 90)
     ws_cover.write(0, 0, conference.conference_title, wb.add_format({"bold": True, "font_size": 20}))
     ws_cover.write(2, 0, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    ws_cover.write(4, 0, f"Scheduled papers: {state.validations.get('scheduled_papers', 0)}")
-    ws_cover.write(5, 0, f"Overflow papers: {state.validations.get('overflow_papers', 0)}")
-    ws_cover.write(6, 0, f"Unassigned papers: {state.validations.get('unassigned_papers', 0)}")
+    ws_cover.write_url(
+        4,
+        0,
+        PLENARY_PROGRAMME_URL,
+        link_fmt,
+        string=PARALLEL_SESSIONS_DISCLAIMER,
+    )
+    ws_cover.write(6, 0, f"Scheduled papers: {state.validations.get('scheduled_papers', 0)}")
+    ws_cover.write(7, 0, f"Overflow papers: {state.validations.get('overflow_papers', 0)}")
+    ws_cover.write(8, 0, f"Unassigned papers: {state.validations.get('unassigned_papers', 0)}")
 
     day_blocks = group_sessions_by_day_block(state)
     ordered_days = _ordered_day_labels_from_state(state)
@@ -738,11 +768,18 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
         )
 
     ws_sessions = wb.add_worksheet("Session Directory")
-    ordered_sessions = sorted(
-        state.sessions,
-        key=lambda s: (s.day_num, parse_start_minutes(s.time), room_sort_key(s.room)),
+    ordered_sessions, _ = _publish_sessions_by_day(state)
+    max_capacity = max(
+        [
+            max(
+                1,
+                int(getattr(session, "capacity", len(getattr(session, "papers", [])) or 1)),
+                len(_session_presentation_papers(session)),
+            )
+            for session in ordered_sessions
+        ],
+        default=1,
     )
-    max_capacity = max([max(1, int(getattr(session, "capacity", len(session.papers) or 1))) for session in ordered_sessions], default=1)
     session_headers = [
         "SessionCode",
         "Day",
@@ -772,8 +809,9 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
         ws_sessions.write(row_idx, 4, session.room, cell_fmt)
         ws_sessions.write(row_idx, 5, max(1, int(getattr(session, "capacity", len(session.papers) or 1))), cell_fmt)
         ws_sessions.write(row_idx, 6, session.session_title, wrap_fmt)
+        presentation_papers = _session_presentation_papers(session)
         for talk_idx in range(max_capacity):
-            paper = session.papers[talk_idx] if talk_idx < len(session.papers) else None
+            paper = presentation_papers[talk_idx] if talk_idx < len(presentation_papers) else None
             talk_col = 7 + talk_idx
             if paper is None:
                 ws_sessions.write(row_idx, talk_col, "[Reserve slot]", reserve_fmt)
@@ -940,6 +978,13 @@ def export_publish_pdf(
     branding_config_path: Optional[Path] = Path(__file__).resolve().parents[1] / "assets/branding.json",
 ) -> Path:
     try:
+        from runtime_compat import install_hashlib_usedforsecurity_compat
+
+        install_hashlib_usedforsecurity_compat()
+    except Exception:
+        pass
+
+    try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -1006,13 +1051,16 @@ def export_publish_pdf(
     story.append(Paragraph(branding["conference_title"], title_style))
     story.append(Spacer(1, 6 * mm))
     story.append(Paragraph(f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
+    story.append(
+        Paragraph(
+            f"{html.escape(PARALLEL_SESSIONS_DISCLAIMER_PREFIX)}"
+            f"<a href='{html.escape(PLENARY_PROGRAMME_URL)}'>{html.escape(PLENARY_PROGRAMME_LINK_TEXT)}</a>.",
+            styles["Normal"],
+        )
+    )
     story.append(Spacer(1, 6 * mm))
 
-    ordered_sessions = sorted(
-        state.sessions,
-        key=lambda s: (s.day_num, parse_start_minutes(s.time), room_sort_key(s.room)),
-    )
-    ordered_days = _ordered_day_labels_from_state(state)
+    ordered_sessions, ordered_days = _publish_sessions_by_day(state)
 
     story.append(Paragraph("Session Booklet", section_style))
 
@@ -1029,7 +1077,7 @@ def export_publish_pdf(
                 )
             )
 
-            for idx, paper in enumerate(session.papers, start=1):
+            for idx, paper in enumerate(_session_presentation_papers(session), start=1):
                 if paper is None:
                     story.append(Paragraph(f"{idx}. [Reserve slot]", small_style))
                     continue
@@ -1050,15 +1098,120 @@ def export_publish_pdf(
     return output_path
 
 
+def _add_docx_hyperlink(paragraph, url: str, text: str) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    relationship_id = paragraph.part.relate_to(
+        url,
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+        is_external=True,
+    )
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink.set(qn("r:id"), relationship_id)
+
+    run = OxmlElement("w:r")
+    run_properties = OxmlElement("w:rPr")
+
+    color = OxmlElement("w:color")
+    color.set(qn("w:val"), "0563C1")
+    run_properties.append(color)
+
+    underline = OxmlElement("w:u")
+    underline.set(qn("w:val"), "single")
+    run_properties.append(underline)
+
+    run.append(run_properties)
+    text_element = OxmlElement("w:t")
+    text_element.text = text
+    run.append(text_element)
+    hyperlink.append(run)
+    paragraph._p.append(hyperlink)
+
+
+def export_publish_docx(
+    state: ProgrammeState,
+    output_path: Path = PUBLISH_DOCX_FILE,
+    branding_config_path: Optional[Path] = Path(__file__).resolve().parents[1] / "assets/branding.json",
+) -> Path:
+    try:
+        from docx import Document
+        from docx.shared import Inches, Pt
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Word export requires `python-docx`. Install dependencies with `pip install -r wic_app/requirements.txt`."
+        ) from exc
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    branding = _load_branding(branding_config_path)
+    document = Document()
+    section = document.sections[0]
+    section.top_margin = Inches(0.65)
+    section.bottom_margin = Inches(0.6)
+    section.left_margin = Inches(0.75)
+    section.right_margin = Inches(0.75)
+
+    styles = document.styles
+    styles["Normal"].font.name = "Arial"
+    styles["Normal"].font.size = Pt(10)
+    styles["Title"].font.name = "Arial"
+    styles["Title"].font.size = Pt(22)
+    styles["Heading 1"].font.name = "Arial"
+    styles["Heading 1"].font.size = Pt(16)
+    styles["Heading 2"].font.name = "Arial"
+    styles["Heading 2"].font.size = Pt(13)
+
+    document.add_paragraph(branding["conference_title"], style="Title")
+    document.add_paragraph(f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    disclaimer = document.add_paragraph()
+    disclaimer.add_run(PARALLEL_SESSIONS_DISCLAIMER_PREFIX)
+    _add_docx_hyperlink(disclaimer, PLENARY_PROGRAMME_URL, PLENARY_PROGRAMME_LINK_TEXT)
+    disclaimer.add_run(".")
+
+    document.add_paragraph("Session Booklet", style="Heading 1")
+    ordered_sessions, ordered_days = _publish_sessions_by_day(state)
+
+    for day_index, day_name in enumerate(ordered_days):
+        document.add_paragraph(day_name, style="Heading 2")
+        day_sessions = [session for session in ordered_sessions if session.day_label == day_name]
+
+        for session in day_sessions:
+            session_heading = document.add_paragraph()
+            title_run = session_heading.add_run(str(getattr(session, "session_title", "") or ""))
+            title_run.bold = True
+            session_heading.add_run(
+                f" | {getattr(session, 'time', '')} | {getattr(session, 'room', '')}"
+            )
+
+            for idx, paper in enumerate(_session_presentation_papers(session), start=1):
+                line = document.add_paragraph()
+                if paper is None:
+                    line.add_run(f"{idx}. [Reserve slot]")
+                    continue
+                title, presenter = _paper_title_and_presenter(paper)
+                line.add_run(f"{idx}. {title} ")
+                presenter_run = line.add_run(presenter)
+                presenter_run.italic = True
+
+        if day_index < len(ordered_days) - 1:
+            document.add_page_break()
+
+    document.save(str(output_path))
+    return output_path
+
+
 def export_all(
     state: ProgrammeState,
     draft_output: Path = DRAFT_OUTPUT_FILE,
     publish_xlsx_output: Path = PUBLISH_XLSX_FILE,
     publish_pdf_output: Path = PUBLISH_PDF_FILE,
+    publish_docx_output: Path = PUBLISH_DOCX_FILE,
 ) -> Dict[str, Path]:
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     return {
         "draft_xlsx": export_draft_workbook(state, draft_output),
         "publish_xlsx": export_publish_excel(state, publish_xlsx_output),
         "publish_pdf": export_publish_pdf(state, publish_pdf_output),
+        "publish_docx": export_publish_docx(state, publish_docx_output),
     }

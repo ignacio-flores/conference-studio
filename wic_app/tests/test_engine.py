@@ -23,6 +23,7 @@ from exporters.publish import (
     export_draft_workbook,
     export_public_excel,
     export_public_payload,
+    export_publish_docx,
     export_publish_excel,
     export_publish_pdf,
 )
@@ -150,6 +151,14 @@ class EngineTests(unittest.TestCase):
             "manual": state_dir / "manual_talks.csv",
         }
 
+    def _zip_text(self, archive_path: Path, suffixes: tuple[str, ...]) -> str:
+        with zipfile.ZipFile(archive_path) as archive:
+            return "\n".join(
+                archive.read(name).decode("utf-8", errors="ignore")
+                for name in archive.namelist()
+                if name.endswith(suffixes)
+            )
+
     def _build_state(self, paths: dict, submissions: Path, programme: Path):
         return build_programme_state(
             submissions_path=submissions,
@@ -252,26 +261,24 @@ class EngineTests(unittest.TestCase):
             public_xlsx_path = export_public_excel(state, tmp_path / "public.xlsx")
             public_payload_path = export_public_payload(state, tmp_path / "programme.json")
             publish_xlsx_path = export_publish_excel(state, tmp_path / "publish.xlsx")
+            publish_docx_path = export_publish_docx(state, tmp_path / "publish.docx")
             self.assertTrue(draft_path.exists())
             self.assertTrue(public_xlsx_path.exists())
             self.assertTrue(public_payload_path.exists())
             self.assertTrue(publish_xlsx_path.exists())
+            self.assertTrue(publish_docx_path.exists())
             self.assertGreater(draft_path.stat().st_size, 0)
             self.assertGreater(public_xlsx_path.stat().st_size, 0)
             self.assertGreater(public_payload_path.stat().st_size, 0)
             self.assertGreater(publish_xlsx_path.stat().st_size, 0)
+            self.assertGreater(publish_docx_path.stat().st_size, 0)
             payload = json.loads(public_payload_path.read_text(encoding="utf-8"))
             if payload["papers"]:
                 first_paper = payload["papers"][0]
                 self.assertNotIn("email", first_paper)
                 self.assertNotIn("reviewer_score", first_paper)
                 self.assertNotIn("link_to_pdf", first_paper)
-            with zipfile.ZipFile(public_xlsx_path) as archive:
-                workbook_text = "\n".join(
-                    archive.read(name).decode("utf-8", errors="ignore")
-                    for name in archive.namelist()
-                    if name.endswith(".xml")
-                )
+            workbook_text = self._zip_text(public_xlsx_path, (".xml",))
             self.assertNotIn("LinkToPDF", workbook_text)
             self.assertNotIn("Open PDF", workbook_text)
 
@@ -287,20 +294,16 @@ class EngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             publish_xlsx_path = export_publish_excel(state, Path(tmp) / "publish.xlsx")
 
-            with zipfile.ZipFile(publish_xlsx_path) as archive:
-                workbook_xml = "\n".join(
-                    archive.read(name).decode("utf-8", errors="ignore")
-                    for name in archive.namelist()
-                    if name.endswith(".xml") or name.endswith(".rels")
-                )
+            workbook_xml = self._zip_text(publish_xlsx_path, (".xml", ".rels"))
 
         self.assertNotIn("PrimaryTheme", workbook_xml)
         self.assertNotIn("Subtheme", workbook_xml)
         self.assertNotIn("LinkToPDF", workbook_xml)
         self.assertNotIn("Publish Programme", workbook_xml)
         self.assertNotIn("This publish workbook contains schedule-ready information without abstract body text.", workbook_xml)
-        self.assertNotIn("<hyperlink", workbook_xml)
         self.assertNotIn("https://example.org", workbook_xml)
+        self.assertIn("plenary sessions programme", workbook_xml)
+        self.assertIn("https://inequalitylab.world/www-site/uploads/2026/04/2026-WIC-Programme.pdf", workbook_xml)
         self.assertNotIn("10h00-10h30", workbook_xml)
         self.assertNotIn("10h30-11h00", workbook_xml)
         self.assertNotIn("10:00-10:30", workbook_xml)
@@ -309,6 +312,87 @@ class EngineTests(unittest.TestCase):
         self.assertIn("Title One", workbook_xml)
         self.assertLess(workbook_xml.index("Title One"), workbook_xml.index("Presenter One"))
         self.assertNotIn("Presenter One - Title One", workbook_xml)
+
+    def test_publish_workbook_treats_overflow_papers_as_session_presentations_and_adds_disclaimer(self) -> None:
+        state = self._simple_publish_state()
+        overflow_paper = SimpleNamespace(
+            submission_id="P3",
+            full_name="Presenter Overflow",
+            title="Title Overflow",
+            abstract="Abstract Overflow",
+            link_to_pdf="https://example.org/p3.pdf",
+            primary_theme="Theme C",
+            detailed_subtheme="Subtheme C",
+            session_code="S1",
+            session_title="Session One",
+            day_label="Day 1 (4th June)",
+            day_num=1,
+            time="10h00-11h00",
+            block_label="SESSION 1",
+            block_num=1,
+            room="R1",
+            placement_status="overflow",
+            overflow_order=1,
+        )
+        state.papers.append(overflow_paper)
+        state.sessions[0].overflow_papers = [overflow_paper]
+        state.validations["overflow_papers"] = 1
+
+        with tempfile.TemporaryDirectory() as tmp:
+            publish_xlsx_path = export_publish_excel(state, Path(tmp) / "publish.xlsx")
+
+            workbook_xml = self._zip_text(publish_xlsx_path, (".xml", ".rels"))
+            visible_text_xml = self._zip_text(publish_xlsx_path, ("sharedStrings.xml",))
+
+        self.assertIn("This programme covers parallel sessions only.", workbook_xml)
+        self.assertIn("plenary sessions programme", visible_text_xml)
+        self.assertNotIn("https://inequalitylab.world/www-site/uploads/2026/04/2026-WIC-Programme.pdf", visible_text_xml)
+        self.assertIn("https://inequalitylab.world/www-site/uploads/2026/04/2026-WIC-Programme.pdf", workbook_xml)
+        self.assertIn("Title Overflow", workbook_xml)
+        self.assertLess(workbook_xml.index("Title Overflow"), workbook_xml.index("Presenter Overflow"))
+        self.assertNotIn("Overflow: 1", workbook_xml)
+
+    def test_publish_docx_matches_session_booklet_content_and_links_plenary_programme(self) -> None:
+        state = self._simple_publish_state()
+        overflow_paper = SimpleNamespace(
+            submission_id="P3",
+            full_name="Presenter Overflow",
+            title="Title Overflow",
+            abstract="Abstract Overflow",
+            link_to_pdf="https://example.org/p3.pdf",
+            primary_theme="Theme C",
+            detailed_subtheme="Subtheme C",
+            session_code="S1",
+            session_title="Session One",
+            day_label="Day 1 (4th June)",
+            day_num=1,
+            time="10h00-11h00",
+            block_label="SESSION 1",
+            block_num=1,
+            room="R1",
+            placement_status="overflow",
+            overflow_order=1,
+        )
+        state.papers.append(overflow_paper)
+        state.sessions[0].overflow_papers = [overflow_paper]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            publish_docx_path = export_publish_docx(state, Path(tmp) / "publish.docx")
+            document_xml = self._zip_text(publish_docx_path, ("document.xml",))
+            relationship_xml = self._zip_text(publish_docx_path, (".rels",))
+
+        self.assertIn("World Inequality Conference 2026", document_xml)
+        self.assertIn("Session Booklet", document_xml)
+        self.assertIn("Session One", document_xml)
+        self.assertIn("Title One", document_xml)
+        self.assertIn("Presenter One", document_xml)
+        self.assertIn("Title Overflow", document_xml)
+        self.assertIn("Presenter Overflow", document_xml)
+        self.assertIn("This programme covers parallel sessions only.", document_xml)
+        self.assertIn("plenary sessions programme", document_xml)
+        self.assertNotIn("https://inequalitylab.world/www-site/uploads/2026/04/2026-WIC-Programme.pdf", document_xml)
+        self.assertIn("https://inequalitylab.world/www-site/uploads/2026/04/2026-WIC-Programme.pdf", relationship_xml)
+        self.assertLess(document_xml.index("Title Overflow"), document_xml.index("Presenter Overflow"))
 
     def test_publish_pdf_starts_with_sessions_and_omits_theme_and_link_metadata(self) -> None:
         state = self._simple_publish_state()
@@ -384,6 +468,99 @@ class EngineTests(unittest.TestCase):
         self.assertIn("<b>Session One</b>", paragraph_markup)
         self.assertIn("Title One", paragraph_text)
         self.assertLess(paragraph_text.index("Title One"), paragraph_text.index("Presenter One"))
+        self.assertIn("plenary sessions programme", paragraph_text)
+        self.assertNotIn("https://inequalitylab.world/www-site/uploads/2026/04/2026-WIC-Programme.pdf", paragraph_text)
+        self.assertIn("href='https://inequalitylab.world/www-site/uploads/2026/04/2026-WIC-Programme.pdf'", paragraph_markup)
+
+    def test_publish_pdf_treats_overflow_papers_as_session_presentations_and_adds_disclaimer(self) -> None:
+        state = self._simple_publish_state()
+        overflow_paper = SimpleNamespace(
+            submission_id="P3",
+            full_name="Presenter Overflow",
+            title="Title Overflow",
+            abstract="Abstract Overflow",
+            link_to_pdf="https://example.org/p3.pdf",
+            primary_theme="Theme C",
+            detailed_subtheme="Subtheme C",
+            session_code="S1",
+            session_title="Session One",
+            day_label="Day 1 (4th June)",
+            day_num=1,
+            time="10h00-11h00",
+            block_label="SESSION 1",
+            block_num=1,
+            room="R1",
+            placement_status="overflow",
+            overflow_order=1,
+        )
+        state.papers.append(overflow_paper)
+        state.sessions[0].overflow_papers = [overflow_paper]
+        captured_story = []
+
+        class FakeColors(types.SimpleNamespace):
+            black = "#000000"
+
+            @staticmethod
+            def HexColor(value: str) -> str:
+                return value
+
+        class FakeParagraphStyle:
+            def __init__(self, name: str, **kwargs) -> None:
+                self.name = name
+                self.kwargs = kwargs
+
+        class FakeParagraph:
+            def __init__(self, text: str, _style) -> None:
+                self.text = text
+
+            def getPlainText(self) -> str:
+                return re.sub(r"<[^>]+>", "", self.text)
+
+        class CapturingDoc:
+            def __init__(self, filename: str, **_kwargs) -> None:
+                self.filename = filename
+
+            def build(self, story) -> None:
+                captured_story.extend(story)
+                Path(self.filename).write_bytes(b"%PDF-FAKE")
+
+        fake_modules = {
+            "reportlab": types.ModuleType("reportlab"),
+            "reportlab.lib": types.ModuleType("reportlab.lib"),
+            "reportlab.lib.colors": FakeColors(),
+            "reportlab.lib.pagesizes": types.SimpleNamespace(A4=(595, 842)),
+            "reportlab.lib.styles": types.SimpleNamespace(
+                ParagraphStyle=FakeParagraphStyle,
+                getSampleStyleSheet=lambda: {
+                    "Title": FakeParagraphStyle("Title"),
+                    "Heading2": FakeParagraphStyle("Heading2"),
+                    "Normal": FakeParagraphStyle("Normal"),
+                },
+            ),
+            "reportlab.lib.units": types.SimpleNamespace(mm=1),
+            "reportlab.platypus": types.SimpleNamespace(
+                PageBreak=lambda: SimpleNamespace(kind="PageBreak"),
+                Paragraph=FakeParagraph,
+                SimpleDocTemplate=CapturingDoc,
+                Spacer=lambda *_args: SimpleNamespace(kind="Spacer"),
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(sys.modules, fake_modules):
+                publish_pdf_path = export_publish_pdf(state, Path(tmp) / "publish.pdf", branding_config_path=None)
+                self.assertTrue(publish_pdf_path.exists())
+
+        paragraph_text = "\n".join(
+            item.getPlainText() for item in captured_story if hasattr(item, "getPlainText")
+        )
+
+        self.assertIn("This programme covers parallel sessions only.", paragraph_text)
+        self.assertIn("plenary sessions programme", paragraph_text)
+        self.assertNotIn("https://inequalitylab.world/www-site/uploads/2026/04/2026-WIC-Programme.pdf", paragraph_text)
+        self.assertIn("Title Overflow", paragraph_text)
+        self.assertLess(paragraph_text.index("Title Overflow"), paragraph_text.index("Presenter Overflow"))
+        self.assertNotIn("Overflow: 1", paragraph_text)
 
     def test_session_lifecycle_clear_remove_restore_create_add_room(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

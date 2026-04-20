@@ -50,6 +50,7 @@ EMPTY_LABEL_SENTINEL = "__WIC_EMPTY_LABEL__"
 DRAFT_OUTPUT_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("draft_output", "WIC2026_Programme_Draft.xlsx")
 PUBLISH_XLSX_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("publish_xlsx_output", "WIC2026_Programme_Publish.xlsx")
 PUBLISH_PDF_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("publish_pdf_output", "WIC2026_Programme_Publish.pdf")
+PUBLISH_DOCX_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("publish_docx_output", "WIC2026_Programme_Publish.docx")
 
 DAY_ORDER = list(ACTIVE_CONFERENCE_CONFIG.days)
 DAY_TO_NUM = ACTIVE_CONFERENCE_CONFIG.day_to_num

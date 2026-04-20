@@ -79,7 +79,7 @@ If you sync the project with Dropbox, treat it as single-writer storage:
 4. Edit session titles from the Inspector.
 5. Click any session/slot block to open the **Inspector** automatically; use `✕` to close it.
 6. Every edit is auto-applied, auto-saved (`wic_app/state/*.csv`), and synced across tabs.
-7. Use top action buttons for **Publish**, **Prepare Public Bundle**, **Preview Public Bundle**, **Undo**, **Reload**, and **Export Draft**.
+7. Use top action buttons for **Publish**, **Prepare Public Bundle**, **Preview Public Bundle**, **Undo**, and **Reload**.
 
 ## CLI generation
 
@@ -97,7 +97,7 @@ python3 wic_app/generate_wic_programme_draft.py --publish
 
 `--publish` now generates:
 
-- local publish workbook/PDF outputs
+- local publish workbook/PDF/Word outputs
 - `public_data/programme.json` for the deployed read-only Streamlit app
 - `public_data/programme.xlsx` for public download
 

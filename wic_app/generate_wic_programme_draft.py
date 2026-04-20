@@ -20,12 +20,14 @@ from exporters.publish import (
     export_draft_workbook,
     export_public_excel,
     export_public_payload,
+    export_publish_docx,
     export_publish_excel,
     export_publish_pdf,
 )
 from public_data import PUBLIC_JSON_FILE, PUBLIC_XLSX_FILE
 from reclassification_engine import (
     DRAFT_OUTPUT_FILE,
+    PUBLISH_DOCX_FILE,
     PUBLISH_PDF_FILE,
     PUBLISH_XLSX_FILE,
     build_programme_state,
@@ -37,7 +39,7 @@ def main() -> None:
     parser.add_argument(
         "--publish",
         action="store_true",
-        help="Also generate publish Excel and PDF outputs.",
+        help="Also generate publish Excel, PDF, and Word outputs.",
     )
     parser.add_argument(
         "--config",
@@ -53,6 +55,7 @@ def main() -> None:
     draft_output = DRAFT_OUTPUT_FILE.parent / conference_config.files.get("draft_output", DRAFT_OUTPUT_FILE.name)
     publish_xlsx_output = PUBLISH_XLSX_FILE.parent / conference_config.files.get("publish_xlsx_output", PUBLISH_XLSX_FILE.name)
     publish_pdf_output = PUBLISH_PDF_FILE.parent / conference_config.files.get("publish_pdf_output", PUBLISH_PDF_FILE.name)
+    publish_docx_output = PUBLISH_DOCX_FILE.parent / conference_config.files.get("publish_docx_output", PUBLISH_DOCX_FILE.name)
     public_json_output = PUBLIC_JSON_FILE.parent / conference_config.files.get("public_json_output", PUBLIC_JSON_FILE.name)
     public_xlsx_output = PUBLIC_XLSX_FILE.parent / conference_config.files.get("public_xlsx_output", PUBLIC_XLSX_FILE.name)
 
@@ -83,6 +86,11 @@ def main() -> None:
         print(f"Generated public workbook: {public_xlsx_path}")
         xlsx_path = export_publish_excel(state, publish_xlsx_output)
         print(f"Generated publish workbook: {xlsx_path}")
+        try:
+            docx_path = export_publish_docx(state, publish_docx_output)
+            print(f"Generated publish Word: {docx_path}")
+        except RuntimeError as exc:
+            print(f"Publish Word skipped: {exc}")
         try:
             pdf_path = export_publish_pdf(state, publish_pdf_output)
             print(f"Generated publish PDF: {pdf_path}")

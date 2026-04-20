@@ -22,6 +22,7 @@ class PublicReleaseCliTests(unittest.TestCase):
             files["draft_output"] = str(tmp_path / "draft.xlsx")
             files["publish_xlsx_output"] = str(tmp_path / "publish.xlsx")
             files["publish_pdf_output"] = str(tmp_path / "publish.pdf")
+            files["publish_docx_output"] = str(tmp_path / "publish.docx")
             files["public_json_output"] = str(tmp_path / "programme.json")
             files["public_xlsx_output"] = str(tmp_path / "programme_public.xlsx")
             config["files"] = files
@@ -41,8 +42,10 @@ class PublicReleaseCliTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, output[-4000:])
             self.assertIn("Generated public JSON", output)
             self.assertIn("Generated public workbook", output)
+            self.assertIn("Generated publish Word", output)
             self.assertTrue((tmp_path / "programme.json").exists())
             self.assertTrue((tmp_path / "programme_public.xlsx").exists())
+            self.assertTrue((tmp_path / "publish.docx").exists())
 
 
 if __name__ == "__main__":
