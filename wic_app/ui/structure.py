@@ -28,6 +28,10 @@ def structure_title_char_limit(visible_room_columns: int) -> int:
     return 84 if resolve_structure_title_lines(visible_room_columns) == 2 else 42
 
 
+def build_block_filter_label(block_num: int, block_label: object, time_label: object) -> str:
+    return f"B{int(block_num or 0)} | {_normalize_text(block_label)} | {_normalize_text(time_label)}"
+
+
 def _status_value(session: object) -> str:
     status = _normalize_text(getattr(session, "status", "active")).lower()
     return status if status in {"active", "inactive"} else "active"
@@ -197,7 +201,7 @@ def block_filter_labels_for_day(
         block_label = _normalize_text(getattr(session, "block_label", ""))
         time_label = _normalize_text(getattr(session, "time", ""))
         key = (block_num, parse_start_minutes_fn(time_label), time_label, block_label)
-        blocks[key] = f"B{block_num} | {block_label} | {time_label}"
+        blocks[key] = build_block_filter_label(block_num, block_label, time_label)
     labels = [blocks[key] for key in sorted(blocks.keys())]
     return ["All blocks"] + labels
 
@@ -235,7 +239,7 @@ def group_sessions_for_structure_matrix(
         block_num = int(getattr(session, "block_num", 0) or 0)
         block_label = _normalize_text(getattr(session, "block_label", ""))
         time_label = _normalize_text(getattr(session, "time", ""))
-        display_block_label = f"B{block_num} | {block_label} | {time_label}"
+        display_block_label = build_block_filter_label(block_num, block_label, time_label)
         if chosen_block_label and chosen_block_label != "All blocks" and display_block_label != chosen_block_label:
             continue
 

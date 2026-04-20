@@ -27,6 +27,7 @@ from exporters.publish import (
     export_publish_excel,
     export_publish_pdf,
 )
+from ui.structure_time import build_time_label
 from reclassification_engine import (
     CLASSIFICATION_OVERRIDES_FILE,
     MANUAL_TALKS_FILE,
@@ -786,6 +787,73 @@ class EngineTests(unittest.TestCase):
             talk_lengths = [paper.talk_end_min - paper.talk_start_min for paper in updated.papers if paper is not None]
             self.assertTrue(talk_lengths)
             self.assertTrue(all(length == 30 for length in talk_lengths))
+
+    def test_time_update_preserves_session_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            missing_submissions = tmp_path / "missing_submissions.xlsx"
+            missing_programme = tmp_path / "missing_programme.xlsx"
+
+            create_result = create_session(
+                day_label="Day 1 (4th June)",
+                block_label="SESSION X",
+                time_label="9h00-10h00",
+                room="R-TIME-EDIT",
+                capacity=3,
+                session_structure_path=paths["structure"],
+            )
+            self.assertTrue(create_result.get("ok", False))
+            session_id = create_result["session_id"]
+
+            manual_ids = []
+            for idx in range(1, 5):
+                talk_result = create_manual_talk(
+                    full_name=f"Time Edit Presenter {idx}",
+                    title=f"Time Edit Talk {idx}",
+                    manual_talks_path=paths["manual"],
+                    paper_placements_path=paths["placements"],
+                )
+                self.assertTrue(talk_result.get("ok", False))
+                manual_ids.append(talk_result["submission_id"])
+
+            placements = load_paper_placements(paths["placements"])
+            for idx, sid in enumerate(manual_ids, start=1):
+                placements[sid] = {
+                    "SubmissionID": sid,
+                    "PlacementStatus": "scheduled",
+                    "SessionId": session_id,
+                    "TalkIndex": str(idx),
+                    "OverflowOrder": "",
+                    "UpdatedAt": "2026-01-01T00:00:00",
+                }
+            write_paper_placements(placements.values(), paths["placements"])
+
+            initial = self._build_state(paths, submissions=missing_submissions, programme=missing_programme)
+            target = next(session for session in initial.sessions if session.session_id == session_id)
+            self.assertEqual([paper.submission_id for paper in target.papers if paper is not None], manual_ids[:3])
+            self.assertEqual([paper.submission_id for paper in target.overflow_papers], manual_ids[3:])
+
+            start_min = 600
+            end_min = 660
+            update_result = update_session_structure_row(
+                session_id,
+                {
+                    "StartMin": str(start_min),
+                    "EndMin": str(end_min),
+                    "TimeLabel": build_time_label(start_min, end_min),
+                },
+                session_structure_path=paths["structure"],
+            )
+            self.assertTrue(update_result.get("ok", False))
+
+            refreshed = self._build_state(paths, submissions=missing_submissions, programme=missing_programme)
+            updated = next(session for session in refreshed.sessions if session.session_id == session_id)
+            self.assertEqual(updated.time, "10h00-11h00")
+            self.assertEqual([paper.submission_id for paper in updated.papers if paper is not None], manual_ids[:3])
+            self.assertEqual([paper.submission_id for paper in updated.overflow_papers], manual_ids[3:])
+            occupied_ranges = [(paper.talk_start_min, paper.talk_end_min) for paper in updated.papers if paper is not None]
+            self.assertEqual(occupied_ranges, [(600, 620), (620, 640), (640, 660)])
 
     def test_bulk_add_room_sessions_defaults_and_collision_skips(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

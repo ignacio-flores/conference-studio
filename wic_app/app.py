@@ -86,6 +86,7 @@ from ui.responsive import (
 )
 from ui.structure import (
     block_filter_labels_for_day,
+    build_block_filter_label,
     build_empty_slot_selection,
     build_new_room_selection,
     build_room_selection,
@@ -455,13 +456,81 @@ def _clear_structure_selection_for_navigation() -> None:
     st.session_state.structure_inspector_open = False
 
 
-def _refresh_state(message: str = "") -> None:
+def _refresh_state(message: str = "", preserve_structure_selection: bool = False) -> None:
     active_tab = _normalize_text(st.session_state.get("active_tab", ""))
-    if active_tab == "Structure":
+    if active_tab == "Structure" and not preserve_structure_selection:
         _clear_structure_selection_for_navigation()
     st.session_state.wic_state = _load_state()
     if message:
         st.session_state.flash_message = message
+
+
+def _queue_structure_session_focus(
+    *,
+    session_id: object,
+    day_label: object,
+    block_num: object,
+    block_label: object,
+    time_label: object,
+    room: object,
+    status: object = "active",
+) -> None:
+    st.session_state.pending_structure_session_focus = {
+        "kind": "session",
+        "session_id": _normalize_text(session_id),
+        "day_label": _normalize_text(day_label),
+        "block_num": int(block_num or 0),
+        "block_label": _normalize_text(block_label),
+        "time_label": _normalize_text(time_label),
+        "room": _normalize_text(room),
+        "status": _normalize_text(status).lower(),
+    }
+
+
+def _queue_structure_filter_reset() -> None:
+    st.session_state.pending_structure_filter_reset = True
+
+
+def _apply_pending_structure_view_updates() -> None:
+    if bool(st.session_state.pop("pending_structure_filter_reset", False)):
+        st.session_state.structure_block_filter = "All blocks"
+
+    pending = st.session_state.pop("pending_structure_session_focus", None)
+    if not isinstance(pending, dict):
+        return
+
+    day_label = _normalize_text(pending.get("day_label", ""))
+    room = _normalize_text(pending.get("room", ""))
+    status = _normalize_text(pending.get("status", "")).lower()
+    block_num = int(pending.get("block_num", 0) or 0)
+    block_label = _normalize_text(pending.get("block_label", ""))
+    time_label = _normalize_text(pending.get("time_label", ""))
+
+    if day_label:
+        st.session_state.structure_day_filter = day_label
+    if status in {"active", "inactive"}:
+        current_status_filter = _normalize_text(st.session_state.get("structure_status_filter", "all")).lower()
+        if current_status_filter in {"active", "inactive"} and current_status_filter != status:
+            st.session_state.structure_status_filter = status
+
+    current_block_filter = _normalize_text(st.session_state.get("structure_block_filter", "All blocks"))
+    if current_block_filter and current_block_filter != "All blocks":
+        st.session_state.structure_block_filter = build_block_filter_label(block_num, block_label, time_label)
+
+    selected_rooms = st.session_state.get("structure_selected_rooms")
+    if isinstance(selected_rooms, list) and room and room not in selected_rooms:
+        st.session_state.structure_selected_rooms = [*selected_rooms, room]
+
+    st.session_state.structure_selection = {
+        "kind": "session",
+        "session_id": _normalize_text(pending.get("session_id", "")),
+        "day_label": day_label,
+        "block_num": block_num,
+        "block_label": block_label,
+        "time_label": time_label,
+        "room": room,
+    }
+    st.session_state.structure_inspector_open = True
 
 
 def _normalize_layout_override_row(row: Dict[str, object], now: str) -> Dict[str, str]:
@@ -731,6 +800,7 @@ def _apply_session_structure_edits_if_changed(edited_df: pd.DataFrame) -> bool:
     current_rows = load_session_structure_rows(SESSION_STRUCTURE_FILE)
     merged: Dict[str, Dict[str, str]] = {sid: dict(row) for sid, row in current_rows.items()}
     changed = False
+    changed_rows: List[tuple[Dict[str, str], Dict[str, str]]] = []
 
     for _, row in edited_df.iterrows():
         session_id = _normalize_text(row.get("SessionId", ""))
@@ -782,6 +852,7 @@ def _apply_session_structure_edits_if_changed(edited_df: pd.DataFrame) -> bool:
         if any(candidate.get(k, "") != current.get(k, "") for k in candidate.keys()):
             candidate["UpdatedAt"] = datetime.utcnow().isoformat(timespec="seconds")
             merged[session_id] = candidate
+            changed_rows.append((dict(current), dict(candidate)))
             changed = True
 
     if not changed:
@@ -794,7 +865,33 @@ def _apply_session_structure_edits_if_changed(edited_df: pd.DataFrame) -> bool:
 
     _push_undo_snapshot()
     write_session_structure_rows(merged.values(), SESSION_STRUCTURE_FILE)
-    _refresh_state("Applied session structure changes.")
+    selected_session_id = ""
+    selection = st.session_state.get("structure_selection", {})
+    if isinstance(selection, dict):
+        selected_session_id = _normalize_text(selection.get("session_id", ""))
+    preserve_selection = False
+    moved_fields = ["DayLabel", "BlockNum", "BlockLabel", "TimeLabel", "StartMin", "EndMin", "Room", "Status"]
+    if (
+        len(changed_rows) == 1
+        and selected_session_id == _normalize_text(changed_rows[0][1].get("SessionId", ""))
+    ):
+        _, candidate = changed_rows[0]
+        _queue_structure_session_focus(
+            session_id=candidate.get("SessionId", ""),
+            day_label=candidate.get("DayLabel", ""),
+            block_num=candidate.get("BlockNum", "0"),
+            block_label=candidate.get("BlockLabel", ""),
+            time_label=candidate.get("TimeLabel", ""),
+            room=candidate.get("Room", ""),
+            status=candidate.get("Status", "active"),
+        )
+        preserve_selection = True
+    elif any(
+        any(before.get(key, "") != after.get(key, "") for key in moved_fields)
+        for before, after in changed_rows
+    ):
+        _queue_structure_filter_reset()
+    _refresh_state("Applied session structure changes.", preserve_structure_selection=preserve_selection)
     return True
 
 
@@ -1545,6 +1642,7 @@ def _render_structure_session_inspector(state, session: object) -> None:
         _push_undo_snapshot()
         start_min = parse_clock_minutes(new_start, default=int(session.start_min))
         end_min = start_min + int(new_duration)
+        time_label = build_time_label(start_min, end_min)
         result = update_session_structure_row(
             session.session_id,
             {
@@ -1553,13 +1651,25 @@ def _render_structure_session_inspector(state, session: object) -> None:
                 "Room": new_room,
                 "StartMin": str(start_min),
                 "EndMin": str(end_min),
-                "TimeLabel": build_time_label(start_min, end_min),
+                "TimeLabel": time_label,
                 "Capacity": str(int(new_capacity)),
             },
             config_path=_app_config_path(),
         )
         if result.get("ok", False):
-            _refresh_state(f"Updated structure for {session.session_code}.")
+            _queue_structure_session_focus(
+                session_id=session.session_id,
+                day_label=session.day_label,
+                block_num=session.block_num,
+                block_label=session.block_label,
+                time_label=time_label,
+                room=new_room,
+                status=new_status,
+            )
+            _refresh_state(
+                f"Updated structure for {session.session_code}.",
+                preserve_structure_selection=True,
+            )
             st.rerun()
         st.error(str(result.get("error", "Failed to update session structure.")))
 
@@ -2039,6 +2149,8 @@ def _render_structure_tab(state, mobile_mode: bool = False) -> None:
         day_options = list(config.days)
     if not day_options:
         day_options = ["Day 1"]
+
+    _apply_pending_structure_view_updates()
 
     if mobile_mode:
         with st.expander("Filters", expanded=True):

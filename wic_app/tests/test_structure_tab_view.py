@@ -12,6 +12,7 @@ if str(APP_ROOT) not in sys.path:
 from reclassification_engine import parse_start_minutes, room_sort_key  # noqa: E402
 from ui.structure import (  # noqa: E402
     block_filter_labels_for_day,
+    build_block_filter_label,
     build_empty_slot_selection,
     build_new_room_selection,
     build_room_selection,
@@ -179,6 +180,9 @@ class StructureTabViewTests(unittest.TestCase):
         self.assertEqual(matrix_title_search["rows"][0]["display_label"], "B2 | SESSION 2 | 11h30-13h00")
         self.assertEqual(matrix_title_search["rooms"], ["R1"])
 
+    def test_block_filter_label_helper_matches_matrix_rows(self) -> None:
+        self.assertEqual(build_block_filter_label(2, "SESSION 2", "11h30-13h00"), "B2 | SESSION 2 | 11h30-13h00")
+
     def test_structure_session_counts_and_unassigned_indicator(self) -> None:
         session = _fake_session(
             session_id="S1",
@@ -294,7 +298,9 @@ class StructureTabViewTests(unittest.TestCase):
     def test_structure_tab_clears_selection_on_filter_navigation_and_transfer(self) -> None:
         app_text = (APP_ROOT / "app.py").read_text(encoding="utf-8")
         self.assertIn("def _clear_structure_selection_for_navigation() -> None:", app_text)
-        self.assertIn('if active_tab == "Structure":', app_text)
+        self.assertIn('if active_tab == "Structure" and not preserve_structure_selection:', app_text)
+        self.assertIn("pending_structure_session_focus", app_text)
+        self.assertIn("preserve_structure_selection=True", app_text)
         self.assertGreaterEqual(app_text.count("on_change=_clear_structure_selection_for_navigation"), 6)
         self.assertIn('if filter_col2.button(', app_text)
         self.assertIn('"Add/Delete days"', app_text)
