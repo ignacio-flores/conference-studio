@@ -20,6 +20,8 @@ if str(APP_ROOT) not in sys.path:
 from engine.config import load_conference_config
 from engine.validation import validate_programme_state
 from exporters.publish import (
+    PUBLISH_DISPLAY_PUBLIC_SAFE,
+    PROGRAMME_CHANGE_NOTICE,
     export_draft_workbook,
     export_public_excel,
     export_public_payload,
@@ -314,6 +316,24 @@ class EngineTests(unittest.TestCase):
         self.assertLess(workbook_xml.index("Title One"), workbook_xml.index("Presenter One"))
         self.assertNotIn("Presenter One - Title One", workbook_xml)
 
+    def test_publish_workbook_public_safe_hides_rooms_and_moderator_labels_and_adds_notice(self) -> None:
+        state = self._simple_publish_state()
+        state.papers[0].is_moderator = True
+        with tempfile.TemporaryDirectory() as tmp:
+            publish_xlsx_path = export_publish_excel(
+                state,
+                Path(tmp) / "publish_public_safe.xlsx",
+                publish_display=PUBLISH_DISPLAY_PUBLIC_SAFE,
+            )
+
+            workbook_xml = self._zip_text(publish_xlsx_path, (".xml", ".rels"))
+            visible_text_xml = self._zip_text(publish_xlsx_path, ("sharedStrings.xml",))
+
+        self.assertIn(PROGRAMME_CHANGE_NOTICE, visible_text_xml)
+        self.assertIn("Track 1", visible_text_xml)
+        self.assertNotIn(" (Moderator)", workbook_xml)
+        self.assertNotIn(">R1<", workbook_xml)
+
     def test_publish_workbook_treats_overflow_papers_as_session_presentations_and_adds_disclaimer(self) -> None:
         state = self._simple_publish_state()
         overflow_paper = SimpleNamespace(
@@ -394,6 +414,21 @@ class EngineTests(unittest.TestCase):
         self.assertNotIn("https://inequalitylab.world/www-site/uploads/2026/04/2026-WIC-Programme.pdf", document_xml)
         self.assertIn("https://inequalitylab.world/www-site/uploads/2026/04/2026-WIC-Programme.pdf", relationship_xml)
         self.assertLess(document_xml.index("Title Overflow"), document_xml.index("Presenter Overflow"))
+
+    def test_publish_docx_public_safe_hides_rooms_and_moderator_labels_and_adds_notice(self) -> None:
+        state = self._simple_publish_state()
+        state.papers[0].is_moderator = True
+        with tempfile.TemporaryDirectory() as tmp:
+            publish_docx_path = export_publish_docx(
+                state,
+                Path(tmp) / "publish_public_safe.docx",
+                publish_display=PUBLISH_DISPLAY_PUBLIC_SAFE,
+            )
+            document_xml = self._zip_text(publish_docx_path, ("document.xml",))
+
+        self.assertIn(PROGRAMME_CHANGE_NOTICE, document_xml)
+        self.assertNotIn(" (Moderator)", document_xml)
+        self.assertNotIn(" | 10h00-11h00 | R1", document_xml)
 
     def test_publish_pdf_starts_with_sessions_and_omits_theme_and_link_metadata(self) -> None:
         state = self._simple_publish_state()
@@ -562,6 +597,78 @@ class EngineTests(unittest.TestCase):
         self.assertIn("Title Overflow", paragraph_text)
         self.assertLess(paragraph_text.index("Title Overflow"), paragraph_text.index("Presenter Overflow"))
         self.assertNotIn("Overflow: 1", paragraph_text)
+
+    def test_publish_pdf_public_safe_hides_rooms_and_moderator_labels_and_adds_notice(self) -> None:
+        state = self._simple_publish_state()
+        state.papers[0].is_moderator = True
+        captured_story = []
+
+        class FakeColors(types.SimpleNamespace):
+            black = "#000000"
+
+            @staticmethod
+            def HexColor(value: str) -> str:
+                return value
+
+        class FakeParagraphStyle:
+            def __init__(self, name: str, **kwargs) -> None:
+                self.name = name
+                self.kwargs = kwargs
+
+        class FakeParagraph:
+            def __init__(self, text: str, _style) -> None:
+                self.text = text
+
+            def getPlainText(self) -> str:
+                return re.sub(r"<[^>]+>", "", self.text)
+
+        class CapturingDoc:
+            def __init__(self, filename: str, **_kwargs) -> None:
+                self.filename = filename
+
+            def build(self, story) -> None:
+                captured_story.extend(story)
+                Path(self.filename).write_bytes(b"%PDF-FAKE")
+
+        fake_modules = {
+            "reportlab": types.ModuleType("reportlab"),
+            "reportlab.lib": types.ModuleType("reportlab.lib"),
+            "reportlab.lib.colors": FakeColors(),
+            "reportlab.lib.pagesizes": types.SimpleNamespace(A4=(595, 842)),
+            "reportlab.lib.styles": types.SimpleNamespace(
+                ParagraphStyle=FakeParagraphStyle,
+                getSampleStyleSheet=lambda: {
+                    "Title": FakeParagraphStyle("Title"),
+                    "Heading2": FakeParagraphStyle("Heading2"),
+                    "Normal": FakeParagraphStyle("Normal"),
+                },
+            ),
+            "reportlab.lib.units": types.SimpleNamespace(mm=1),
+            "reportlab.platypus": types.SimpleNamespace(
+                PageBreak=lambda: SimpleNamespace(kind="PageBreak"),
+                Paragraph=FakeParagraph,
+                SimpleDocTemplate=CapturingDoc,
+                Spacer=lambda *_args: SimpleNamespace(kind="Spacer"),
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(sys.modules, fake_modules):
+                publish_pdf_path = export_publish_pdf(
+                    state,
+                    Path(tmp) / "publish_public_safe.pdf",
+                    branding_config_path=None,
+                    publish_display=PUBLISH_DISPLAY_PUBLIC_SAFE,
+                )
+                self.assertTrue(publish_pdf_path.exists())
+
+        paragraph_text = "\n".join(
+            item.getPlainText() for item in captured_story if hasattr(item, "getPlainText")
+        )
+
+        self.assertIn(PROGRAMME_CHANGE_NOTICE, paragraph_text)
+        self.assertNotIn(" (Moderator)", paragraph_text)
+        self.assertNotIn(" | 10h00-11h00 | R1", paragraph_text)
 
     def test_session_lifecycle_clear_remove_restore_create_add_room(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

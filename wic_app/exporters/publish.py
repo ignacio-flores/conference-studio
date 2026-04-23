@@ -30,6 +30,38 @@ PLENARY_PROGRAMME_URL = "https://inequalitylab.world/www-site/uploads/2026/04/20
 PLENARY_PROGRAMME_LINK_TEXT = "plenary sessions programme"
 PARALLEL_SESSIONS_DISCLAIMER_PREFIX = "This programme covers parallel sessions only. For plenary sessions, see the "
 PARALLEL_SESSIONS_DISCLAIMER = f"{PARALLEL_SESSIONS_DISCLAIMER_PREFIX}{PLENARY_PROGRAMME_LINK_TEXT}."
+PROGRAMME_CHANGE_NOTICE = (
+    "Programme details may still change before the conference, especially due to cancellations; "
+    "sessions and presenters may be swapped."
+)
+PUBLISH_DISPLAY_FULL = "full"
+PUBLISH_DISPLAY_PUBLIC_SAFE = "public_safe"
+VALID_PUBLISH_DISPLAY_MODES = {PUBLISH_DISPLAY_FULL, PUBLISH_DISPLAY_PUBLIC_SAFE}
+
+
+def normalize_publish_display_mode(value: Optional[str]) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in VALID_PUBLISH_DISPLAY_MODES:
+        return normalized
+    return PUBLISH_DISPLAY_FULL
+
+
+def _show_room_numbers(publish_display: str) -> bool:
+    return normalize_publish_display_mode(publish_display) == PUBLISH_DISPLAY_FULL
+
+
+def _show_moderator_labels(publish_display: str) -> bool:
+    return normalize_publish_display_mode(publish_display) == PUBLISH_DISPLAY_FULL
+
+
+def _show_change_notice(publish_display: str) -> bool:
+    return normalize_publish_display_mode(publish_display) == PUBLISH_DISPLAY_PUBLIC_SAFE
+
+
+def _display_room_value(room: object, publish_display: str) -> str:
+    if not _show_room_numbers(publish_display):
+        return ""
+    return str(room or "").strip()
 
 
 def _session_slot_ranges(session) -> List[Tuple[int, int]]:
@@ -117,7 +149,16 @@ def _write_title_presenter_cell(
     ws.write_rich_string(row, col, title, "\n", presenter_fmt, presenter, cell_fmt)
 
 
-def _write_session_programme_cell(ws, row: int, col: int, session, cell_fmt, presenter_fmt, session_fmt) -> None:
+def _write_session_programme_cell(
+    ws,
+    row: int,
+    col: int,
+    session,
+    cell_fmt,
+    presenter_fmt,
+    session_fmt,
+    include_moderator: bool = True,
+) -> None:
     if session is None:
         ws.write(row, col, "", cell_fmt)
         return
@@ -132,7 +173,7 @@ def _write_session_programme_cell(ws, row: int, col: int, session, cell_fmt, pre
         f"{session.session_code} | {session.session_title}",
     ]
     for paper in presentation_papers:
-        title, presenter = _paper_title_and_presenter(paper, include_moderator=True)
+        title, presenter = _paper_title_and_presenter(paper, include_moderator=include_moderator)
         fragments.extend(["\n\n", title])
         if presenter:
             fragments.extend(["\n", presenter_fmt, presenter])
@@ -281,11 +322,14 @@ def _write_publish_day_sheet(
     day_name: str,
     day_blocks: Dict[Tuple[int, str, str], Dict[str, object]],
     fmts: Dict[str, object],
+    publish_display: str = PUBLISH_DISPLAY_FULL,
 ) -> None:
     rooms = sorted(
         {room for room_map in day_blocks.values() for room in room_map.keys()},
         key=room_sort_key,
     )
+    show_room_numbers = _show_room_numbers(publish_display)
+    show_moderator_labels = _show_moderator_labels(publish_display)
 
     ws.set_column(0, 0, 18)
     ws.set_column(1, max(1, len(rooms)), 58)
@@ -303,7 +347,8 @@ def _write_publish_day_sheet(
     row += 1
     ws.write(row, 0, "Session time", fmts["header"])
     for col_idx, room in enumerate(rooms, start=1):
-        ws.write(row, col_idx, room, fmts["header"])
+        room_header = room if show_room_numbers else f"Track {col_idx}"
+        ws.write(row, col_idx, room_header, fmts["header"])
     row += 1
 
     for block_key in sorted(day_blocks.keys(), key=lambda x: x[0]):
@@ -340,6 +385,7 @@ def _write_publish_day_sheet(
                 fmts["wrap"],
                 fmts["presenter_text"],
                 fmts["session_text"],
+                include_moderator=show_moderator_labels,
             )
         row += 2
 
@@ -721,10 +767,16 @@ def export_public_excel(state: ProgrammeState, output_path: Path = PUBLIC_XLSX_F
     return output_path
 
 
-def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX_FILE) -> Path:
+def export_publish_excel(
+    state: ProgrammeState,
+    output_path: Path = PUBLISH_XLSX_FILE,
+    publish_display: str = PUBLISH_DISPLAY_FULL,
+) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wb = xlsxwriter.Workbook(str(output_path))
     conference = load_conference_config()
+    publish_display = normalize_publish_display_mode(publish_display)
+    show_moderator_labels = _show_moderator_labels(publish_display)
 
     header_fmt = wb.add_format({"bold": True, "bg_color": "#E8EEF8", "border": 1, "valign": "top", "text_wrap": True})
     cell_fmt = wb.add_format({"border": 1, "valign": "top", "text_wrap": True})
@@ -740,6 +792,7 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
     presenter_text_fmt = wb.add_format({"font_color": "#666666", "italic": True})
     session_text_fmt = wb.add_format({"bold": True})
     link_fmt = wb.add_format({"font_color": "blue", "underline": 1, "text_wrap": True, "valign": "top"})
+    cover_note_fmt = wb.add_format({"italic": True, "font_color": "#555555", "text_wrap": True})
 
     fmts = {
         "header": header_fmt,
@@ -766,9 +819,13 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
         link_fmt,
         string=PARALLEL_SESSIONS_DISCLAIMER,
     )
-    ws_cover.write(6, 0, f"Scheduled papers: {state.validations.get('scheduled_papers', 0)}")
-    ws_cover.write(7, 0, f"Overflow papers: {state.validations.get('overflow_papers', 0)}")
-    ws_cover.write(8, 0, f"Unassigned papers: {state.validations.get('unassigned_papers', 0)}")
+    stats_row_start = 6
+    if _show_change_notice(publish_display):
+        ws_cover.write(5, 0, PROGRAMME_CHANGE_NOTICE, cover_note_fmt)
+        stats_row_start = 7
+    ws_cover.write(stats_row_start, 0, f"Scheduled papers: {state.validations.get('scheduled_papers', 0)}")
+    ws_cover.write(stats_row_start + 1, 0, f"Overflow papers: {state.validations.get('overflow_papers', 0)}")
+    ws_cover.write(stats_row_start + 2, 0, f"Unassigned papers: {state.validations.get('unassigned_papers', 0)}")
 
     day_blocks = group_sessions_by_day_block(state)
     ordered_days = _ordered_day_labels_from_state(state)
@@ -781,6 +838,7 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
             day_name,
             day_blocks.get(day_name, {}),
             fmts,
+            publish_display=publish_display,
         )
 
     ws_sessions = wb.add_worksheet("Session Directory")
@@ -822,7 +880,7 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
         ws_sessions.write(row_idx, 1, session.day_label, cell_fmt)
         ws_sessions.write(row_idx, 2, session.time, cell_fmt)
         ws_sessions.write(row_idx, 3, session.block_label, wrap_fmt)
-        ws_sessions.write(row_idx, 4, session.room, cell_fmt)
+        ws_sessions.write(row_idx, 4, _display_room_value(session.room, publish_display), cell_fmt)
         ws_sessions.write(row_idx, 5, max(1, int(getattr(session, "capacity", len(session.papers) or 1))), cell_fmt)
         ws_sessions.write(row_idx, 6, session.session_title, wrap_fmt)
         presentation_papers = _session_presentation_papers(session)
@@ -839,7 +897,7 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
                     paper,
                     wrap_fmt,
                     presenter_text_fmt,
-                    include_moderator=True,
+                    include_moderator=show_moderator_labels,
                 )
 
     ws_papers = wb.add_worksheet("Paper Index")
@@ -875,7 +933,7 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
         ws_papers.write(row_idx, 3, paper.session_title, wrap_fmt)
         ws_papers.write(row_idx, 4, paper.day_label, cell_fmt)
         ws_papers.write(row_idx, 5, paper.time, cell_fmt)
-        ws_papers.write(row_idx, 6, paper.room, cell_fmt)
+        ws_papers.write(row_idx, 6, _display_room_value(paper.room, publish_display), cell_fmt)
 
     ws_issues = wb.add_worksheet("Issues")
     ws_issues.freeze_panes(1, 0)
@@ -993,6 +1051,7 @@ def export_publish_pdf(
     state: ProgrammeState,
     output_path: Path = PUBLISH_PDF_FILE,
     branding_config_path: Optional[Path] = Path(__file__).resolve().parents[1] / "assets/branding.json",
+    publish_display: str = PUBLISH_DISPLAY_FULL,
 ) -> Path:
     try:
         from runtime_compat import install_hashlib_usedforsecurity_compat
@@ -1018,6 +1077,9 @@ def export_publish_pdf(
         ) from exc
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    publish_display = normalize_publish_display_mode(publish_display)
+    show_room_numbers = _show_room_numbers(publish_display)
+    show_moderator_labels = _show_moderator_labels(publish_display)
 
     branding = _load_branding(branding_config_path)
     styles = getSampleStyleSheet()
@@ -1075,6 +1137,8 @@ def export_publish_pdf(
             styles["Normal"],
         )
     )
+    if _show_change_notice(publish_display):
+        story.append(Paragraph(html.escape(PROGRAMME_CHANGE_NOTICE), styles["Normal"]))
     story.append(Spacer(1, 6 * mm))
 
     ordered_sessions, ordered_days = _publish_sessions_by_day(state)
@@ -1086,10 +1150,12 @@ def export_publish_pdf(
         day_sessions = [s for s in ordered_sessions if s.day_label == day_name]
 
         for session in day_sessions:
+            session_heading = f"<b>{html.escape(session.session_title)}</b> | {html.escape(session.time)}"
+            if show_room_numbers:
+                session_heading = f"{session_heading} | {html.escape(session.room)}"
             story.append(
                 Paragraph(
-                    f"<b>{html.escape(session.session_title)}</b> | "
-                    f"{html.escape(session.time)} | {html.escape(session.room)}",
+                    session_heading,
                     styles["Normal"],
                 )
             )
@@ -1098,7 +1164,7 @@ def export_publish_pdf(
                 if paper is None:
                     story.append(Paragraph(f"{idx}. [Reserve slot]", small_style))
                     continue
-                title, presenter = _paper_title_and_presenter(paper, include_moderator=True)
+                title, presenter = _paper_title_and_presenter(paper, include_moderator=show_moderator_labels)
                 story.append(
                     Paragraph(
                         f"{idx}. {html.escape(title)} "
@@ -1150,6 +1216,7 @@ def export_publish_docx(
     state: ProgrammeState,
     output_path: Path = PUBLISH_DOCX_FILE,
     branding_config_path: Optional[Path] = Path(__file__).resolve().parents[1] / "assets/branding.json",
+    publish_display: str = PUBLISH_DISPLAY_FULL,
 ) -> Path:
     try:
         from docx import Document
@@ -1160,6 +1227,9 @@ def export_publish_docx(
         ) from exc
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    publish_display = normalize_publish_display_mode(publish_display)
+    show_room_numbers = _show_room_numbers(publish_display)
+    show_moderator_labels = _show_moderator_labels(publish_display)
 
     branding = _load_branding(branding_config_path)
     document = Document()
@@ -1185,6 +1255,8 @@ def export_publish_docx(
     disclaimer.add_run(PARALLEL_SESSIONS_DISCLAIMER_PREFIX)
     _add_docx_hyperlink(disclaimer, PLENARY_PROGRAMME_URL, PLENARY_PROGRAMME_LINK_TEXT)
     disclaimer.add_run(".")
+    if _show_change_notice(publish_display):
+        document.add_paragraph(PROGRAMME_CHANGE_NOTICE)
 
     document.add_paragraph("Session Booklet", style="Heading 1")
     ordered_sessions, ordered_days = _publish_sessions_by_day(state)
@@ -1197,16 +1269,16 @@ def export_publish_docx(
             session_heading = document.add_paragraph()
             title_run = session_heading.add_run(str(getattr(session, "session_title", "") or ""))
             title_run.bold = True
-            session_heading.add_run(
-                f" | {getattr(session, 'time', '')} | {getattr(session, 'room', '')}"
-            )
+            session_heading.add_run(f" | {getattr(session, 'time', '')}")
+            if show_room_numbers:
+                session_heading.add_run(f" | {getattr(session, 'room', '')}")
 
             for idx, paper in enumerate(_session_presentation_papers(session), start=1):
                 line = document.add_paragraph()
                 if paper is None:
                     line.add_run(f"{idx}. [Reserve slot]")
                     continue
-                title, presenter = _paper_title_and_presenter(paper, include_moderator=True)
+                title, presenter = _paper_title_and_presenter(paper, include_moderator=show_moderator_labels)
                 line.add_run(f"{idx}. {title} ")
                 presenter_run = line.add_run(presenter)
                 presenter_run.italic = True
@@ -1224,11 +1296,12 @@ def export_all(
     publish_xlsx_output: Path = PUBLISH_XLSX_FILE,
     publish_pdf_output: Path = PUBLISH_PDF_FILE,
     publish_docx_output: Path = PUBLISH_DOCX_FILE,
+    publish_display: str = PUBLISH_DISPLAY_FULL,
 ) -> Dict[str, Path]:
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     return {
         "draft_xlsx": export_draft_workbook(state, draft_output),
-        "publish_xlsx": export_publish_excel(state, publish_xlsx_output),
-        "publish_pdf": export_publish_pdf(state, publish_pdf_output),
-        "publish_docx": export_publish_docx(state, publish_docx_output),
+        "publish_xlsx": export_publish_excel(state, publish_xlsx_output, publish_display=publish_display),
+        "publish_pdf": export_publish_pdf(state, publish_pdf_output, publish_display=publish_display),
+        "publish_docx": export_publish_docx(state, publish_docx_output, publish_display=publish_display),
     }

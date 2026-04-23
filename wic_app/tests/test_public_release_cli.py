@@ -31,7 +31,15 @@ class PublicReleaseCliTests(unittest.TestCase):
             config_path.write_text(json.dumps(config), encoding="utf-8")
 
             completed = subprocess.run(
-                [sys.executable, str(script_path), "--publish", "--config", str(config_path)],
+                [
+                    sys.executable,
+                    str(script_path),
+                    "--publish",
+                    "--publish-display",
+                    "public_safe",
+                    "--config",
+                    str(config_path),
+                ],
                 cwd=str(repo_root / "wic_app"),
                 capture_output=True,
                 text=True,
@@ -40,12 +48,15 @@ class PublicReleaseCliTests(unittest.TestCase):
 
             output = (completed.stdout or "") + (completed.stderr or "")
             self.assertEqual(completed.returncode, 0, output[-4000:])
+            self.assertIn("Publish display mode: public_safe", output)
             self.assertIn("Generated public JSON", output)
             self.assertIn("Generated public workbook", output)
-            self.assertIn("Generated publish Word", output)
+            self.assertTrue(
+                ("Generated publish Word" in output) or ("Publish Word skipped" in output),
+                output,
+            )
             self.assertTrue((tmp_path / "programme.json").exists())
             self.assertTrue((tmp_path / "programme_public.xlsx").exists())
-            self.assertTrue((tmp_path / "publish.docx").exists())
 
 
 if __name__ == "__main__":

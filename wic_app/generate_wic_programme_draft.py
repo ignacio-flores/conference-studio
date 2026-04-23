@@ -17,6 +17,8 @@ install_hashlib_usedforsecurity_compat()
 
 from engine.config import load_conference_config
 from exporters.publish import (
+    PUBLISH_DISPLAY_FULL,
+    PUBLISH_DISPLAY_PUBLIC_SAFE,
     export_draft_workbook,
     export_public_excel,
     export_public_payload,
@@ -46,6 +48,13 @@ def main() -> None:
         type=str,
         default="",
         help="Optional path to conference config JSON/YAML.",
+    )
+    parser.add_argument(
+        "--publish-display",
+        type=str,
+        choices=[PUBLISH_DISPLAY_FULL, PUBLISH_DISPLAY_PUBLIC_SAFE],
+        default=PUBLISH_DISPLAY_FULL,
+        help="Publish display mode: full or public_safe.",
     )
     args = parser.parse_args()
 
@@ -80,19 +89,20 @@ def main() -> None:
         print(f"Missing papers: {validations['missing_submission_ids']}")
 
     if args.publish:
+        print(f"Publish display mode: {args.publish_display}")
         public_json_path = export_public_payload(state, public_json_output)
         print(f"Generated public JSON: {public_json_path}")
         public_xlsx_path = export_public_excel(state, public_xlsx_output)
         print(f"Generated public workbook: {public_xlsx_path}")
-        xlsx_path = export_publish_excel(state, publish_xlsx_output)
+        xlsx_path = export_publish_excel(state, publish_xlsx_output, publish_display=args.publish_display)
         print(f"Generated publish workbook: {xlsx_path}")
         try:
-            docx_path = export_publish_docx(state, publish_docx_output)
+            docx_path = export_publish_docx(state, publish_docx_output, publish_display=args.publish_display)
             print(f"Generated publish Word: {docx_path}")
         except RuntimeError as exc:
             print(f"Publish Word skipped: {exc}")
         try:
-            pdf_path = export_publish_pdf(state, publish_pdf_output)
+            pdf_path = export_publish_pdf(state, publish_pdf_output, publish_display=args.publish_display)
             print(f"Generated publish PDF: {pdf_path}")
         except RuntimeError as exc:
             print(f"Publish PDF skipped: {exc}")

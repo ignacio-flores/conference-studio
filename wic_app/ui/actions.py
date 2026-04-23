@@ -34,13 +34,25 @@ def render_top_actions(
                 "Planning issues exist (overflow/unassigned/collisions). You can still publish, but review Checks."
             )
 
+        publish_display = st.radio(
+            "Publish display",
+            options=["full", "public_safe"],
+            format_func=lambda option: "Full display" if option == "full" else "Hide rooms + moderators",
+            horizontal=True,
+            key="publish_display_mode",
+        )
+        if publish_display == "public_safe":
+            st.caption(
+                "Rooms and moderator labels will be hidden in publish Excel, PDF, and Word exports."
+            )
+
         if st.button("Publish (Excel + PDF + Word)", type="primary", use_container_width=True):
             try:
                 if not_edited_count > 0:
                     st.warning(f"Publishing with {not_edited_count} not-edited papers.")
-                xlsx_path = export_publish_excel(state)
-                docx_path = export_publish_docx(state)
-                pdf_path = export_publish_pdf(state)
+                xlsx_path = export_publish_excel(state, publish_display=publish_display)
+                docx_path = export_publish_docx(state, publish_display=publish_display)
+                pdf_path = export_publish_pdf(state, publish_display=publish_display)
                 st.success(f"Publish Excel: {xlsx_path}")
                 st.success(f"Publish PDF: {pdf_path}")
                 st.success(f"Publish Word: {docx_path}")
