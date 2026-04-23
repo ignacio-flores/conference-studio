@@ -47,6 +47,7 @@ class PublicWwwLayoutTests(unittest.TestCase):
         self.assertIn("click", text)
         self.assertIn("activeDay", text)
         self.assertIn("programme-view", text)
+        self.assertIn("presenter_display", text)
 
 
 if __name__ == "__main__":

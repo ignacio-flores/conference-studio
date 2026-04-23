@@ -19,11 +19,22 @@ def _clean_text(value: object) -> str:
     return str(value or "").strip()
 
 
+def _public_presenter_display(name: str, *, is_moderator: bool) -> str:
+    presenter = _clean_text(name) or "[No presenter]"
+    if is_moderator:
+        return f"{presenter} (Moderator)"
+    return presenter
+
+
 def _public_talk_record(paper: object, session: object) -> Dict[str, Any]:
+    authors = _clean_text(getattr(paper, "full_name", ""))
+    is_moderator = bool(getattr(paper, "is_moderator", False))
     return {
         "submission_id": _clean_text(getattr(paper, "submission_id", "")),
         "title": _clean_text(getattr(paper, "title", "")),
-        "authors": _clean_text(getattr(paper, "full_name", "")),
+        "authors": authors,
+        "is_moderator": is_moderator,
+        "presenter_display": _public_presenter_display(authors, is_moderator=is_moderator),
         "abstract": _clean_text(getattr(paper, "abstract", "")),
         "primary_theme": _clean_text(getattr(paper, "primary_theme", getattr(session, "primary_theme", ""))),
         "subtheme": _clean_text(getattr(paper, "detailed_subtheme", getattr(session, "subtheme", ""))),

@@ -399,6 +399,7 @@ PAPER_METADATA_HEADERS = [
     "SubmissionID",
     "TitleOverride",
     "AuthorOverride",
+    "IsModerator",
     "UpdatedAt",
 ]
 
@@ -465,6 +466,7 @@ class Paper:
     talk_end_min: int = 0
     placement_status: str = "scheduled"
     overflow_order: int = 0
+    is_moderator: bool = False
 
 
 @dataclass
@@ -565,7 +567,11 @@ def _compute_edited_submission_ids(
             edited.add(sid)
 
     for sid, row in (metadata_overrides or {}).items():
-        if str(row.get("TitleOverride", "")).strip() or str(row.get("AuthorOverride", "")).strip():
+        if (
+            str(row.get("TitleOverride", "")).strip()
+            or str(row.get("AuthorOverride", "")).strip()
+            or parse_bool(str(row.get("IsModerator", "")))
+        ):
             edited.add(sid)
 
     for sid, row in (archive_overrides or {}).items():
@@ -1129,7 +1135,13 @@ def load_paper_metadata_overrides(path: Path = PAPER_METADATA_OVERRIDES_FILE) ->
         sid = row.get("SubmissionID", "")
         if not sid:
             continue
-        out[sid] = row
+        out[sid] = {
+            "SubmissionID": sid,
+            "TitleOverride": str(row.get("TitleOverride", "")).strip(),
+            "AuthorOverride": str(row.get("AuthorOverride", "")).strip(),
+            "IsModerator": "True" if parse_bool(str(row.get("IsModerator", ""))) else "",
+            "UpdatedAt": str(row.get("UpdatedAt", "")).strip(),
+        }
     return out
 
 
@@ -1145,12 +1157,14 @@ def write_paper_metadata_overrides(
             continue
         title_override = str(row.get("TitleOverride", "")).strip()
         author_override = str(row.get("AuthorOverride", "")).strip()
-        if not title_override and not author_override:
+        is_moderator = parse_bool(str(row.get("IsModerator", "")))
+        if not title_override and not author_override and not is_moderator:
             continue
         normalized[sid] = {
             "SubmissionID": sid,
             "TitleOverride": title_override,
             "AuthorOverride": author_override,
+            "IsModerator": "True" if is_moderator else "",
             "UpdatedAt": str(row.get("UpdatedAt", "")).strip() or now,
         }
 
@@ -1506,10 +1520,34 @@ def _apply_paper_metadata_overrides(
             continue
         title_override = str(row.get("TitleOverride", "")).strip()
         author_override = str(row.get("AuthorOverride", "")).strip()
+        is_moderator = parse_bool(str(row.get("IsModerator", "")))
         if title_override:
             paper.title = title_override
         if author_override:
             paper.full_name = author_override
+        paper.is_moderator = is_moderator
+
+
+def _normalize_session_moderators(sessions: Iterable[Session]) -> None:
+    for session in sessions:
+        selected_submission_id = ""
+        for paper in list(getattr(session, "papers", []) or []):
+            if paper is None:
+                continue
+            if bool(getattr(paper, "is_moderator", False)):
+                selected_submission_id = str(getattr(paper, "submission_id", "")).strip()
+                break
+
+        for paper in list(getattr(session, "papers", []) or []):
+            if paper is None:
+                continue
+            sid = str(getattr(paper, "submission_id", "")).strip()
+            paper.is_moderator = bool(selected_submission_id and sid == selected_submission_id)
+
+        for paper in list(getattr(session, "overflow_papers", []) or []):
+            if paper is None:
+                continue
+            paper.is_moderator = False
 
 
 def _parse_block_num_from_label(block_label: str, default: int = 0) -> int:
@@ -3392,6 +3430,7 @@ def build_programme_state(
 
     unassigned_papers, slot_conflicts = apply_paper_placements_core(active_papers, all_sessions, placements)
     _refresh_session_theme_metadata(all_sessions)
+    _normalize_session_moderators(all_sessions)
     for session in all_sessions:
         if session.session_code in session_name_overrides:
             session.session_title = session_name_overrides[session.session_code]

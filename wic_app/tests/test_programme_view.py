@@ -57,6 +57,9 @@ class ProgrammeViewTests(unittest.TestCase):
         self.assertIn('"overflow_order"', app_text)
         self.assertIn('key=f"select_overflow_{session.session_id}_{overflow_order}"', app_text)
         self.assertIn('[!] (overflow #{overflow_order})', app_text)
+        self.assertIn("Set Moderator", app_text)
+        self.assertIn("_set_session_moderator(", app_text)
+        self.assertIn('key=f"ins_set_moderator_{session.session_id}_{talk_idx}"', app_text)
 
     def test_programme_view_includes_mobile_dialog_and_compare_mode(self) -> None:
         app_text = (APP_ROOT / "app.py").read_text(encoding="utf-8")

@@ -20,6 +20,7 @@ class PublicAppLayoutTests(unittest.TestCase):
         self.assertIn('st.subheader("Session details")', text)
         self.assertIn('st.subheader("Paper details")', text)
         self.assertIn("abstract_open_submission_id", text)
+        self.assertIn("presenter_display", text)
 
     def test_public_app_does_not_use_admin_inspector_language(self) -> None:
         text = (APP_ROOT / "public_app.py").read_text(encoding="utf-8")

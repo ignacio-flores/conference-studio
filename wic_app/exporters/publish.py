@@ -62,17 +62,25 @@ def _build_agenda_cell(session) -> str:
         if paper is None:
             lines.append(f"{idx}. {format_minutes(start_min)}-{format_minutes(end_min)} [Reserve slot]")
         else:
-            lines.append(f"{idx}. {format_minutes(start_min)}-{format_minutes(end_min)} {paper.full_name} | {paper.title}")
+            presenter = _presenter_label(paper, include_moderator=True)
+            lines.append(f"{idx}. {format_minutes(start_min)}-{format_minutes(end_min)} {presenter} | {paper.title}")
     if session.overflow_papers:
         lines.append(f"Overflow: {len(session.overflow_papers)}")
     return "\n".join(lines)
 
 
-def _paper_title_and_presenter(paper) -> Tuple[str, str]:
+def _presenter_label(paper, include_moderator: bool = False) -> str:
+    presenter = str(getattr(paper, "full_name", "") or "").strip() or "[No presenter]"
+    if include_moderator and bool(getattr(paper, "is_moderator", False)):
+        return f"{presenter} (Moderator)"
+    return presenter
+
+
+def _paper_title_and_presenter(paper, include_moderator: bool = False) -> Tuple[str, str]:
     if paper is None:
         return "[Reserve slot]", ""
     title = str(getattr(paper, "title", "") or "").strip() or "[Untitled]"
-    presenter = str(getattr(paper, "full_name", "") or "").strip() or "[No presenter]"
+    presenter = _presenter_label(paper, include_moderator=include_moderator)
     return title, presenter
 
 
@@ -93,8 +101,16 @@ def _publish_sessions_by_day(state: ProgrammeState) -> Tuple[List[object], List[
     return ordered_sessions, _ordered_day_labels_from_state(state)
 
 
-def _write_title_presenter_cell(ws, row: int, col: int, paper, cell_fmt, presenter_fmt) -> None:
-    title, presenter = _paper_title_and_presenter(paper)
+def _write_title_presenter_cell(
+    ws,
+    row: int,
+    col: int,
+    paper,
+    cell_fmt,
+    presenter_fmt,
+    include_moderator: bool = False,
+) -> None:
+    title, presenter = _paper_title_and_presenter(paper, include_moderator=include_moderator)
     if not presenter:
         ws.write(row, col, title, cell_fmt)
         return
@@ -116,7 +132,7 @@ def _write_session_programme_cell(ws, row: int, col: int, session, cell_fmt, pre
         f"{session.session_code} | {session.session_title}",
     ]
     for paper in presentation_papers:
-        title, presenter = _paper_title_and_presenter(paper)
+        title, presenter = _paper_title_and_presenter(paper, include_moderator=True)
         fragments.extend(["\n\n", title])
         if presenter:
             fragments.extend(["\n", presenter_fmt, presenter])
@@ -663,7 +679,7 @@ def export_public_excel(state: ProgrammeState, output_path: Path = PUBLIC_XLSX_F
         ws_sessions.write(
             row_idx,
             8,
-            "\n".join(f"{talk['authors']} - {talk['title']}" for talk in session["talks"]),
+            "\n".join(f"{talk.get('presenter_display', talk['authors'])} - {talk['title']}" for talk in session["talks"]),
             wrap_fmt,
         )
 
@@ -823,6 +839,7 @@ def export_publish_excel(state: ProgrammeState, output_path: Path = PUBLISH_XLSX
                     paper,
                     wrap_fmt,
                     presenter_text_fmt,
+                    include_moderator=True,
                 )
 
     ws_papers = wb.add_worksheet("Paper Index")
@@ -1081,7 +1098,7 @@ def export_publish_pdf(
                 if paper is None:
                     story.append(Paragraph(f"{idx}. [Reserve slot]", small_style))
                     continue
-                title, presenter = _paper_title_and_presenter(paper)
+                title, presenter = _paper_title_and_presenter(paper, include_moderator=True)
                 story.append(
                     Paragraph(
                         f"{idx}. {html.escape(title)} "
@@ -1189,7 +1206,7 @@ def export_publish_docx(
                 if paper is None:
                     line.add_run(f"{idx}. [Reserve slot]")
                     continue
-                title, presenter = _paper_title_and_presenter(paper)
+                title, presenter = _paper_title_and_presenter(paper, include_moderator=True)
                 line.add_run(f"{idx}. {title} ")
                 presenter_run = line.add_run(presenter)
                 presenter_run.italic = True

@@ -360,7 +360,7 @@ def _render_session_details(sessions: List[Dict[str, Any]], papers: List[Dict[st
     for talk in list(session.get("talks", []) or []):
         talk_id = _normalize_text(talk.get("submission_id", ""))
         st.markdown(f"**{talk['title']}**")
-        st.caption(talk["authors"])
+        st.caption(_normalize_text(talk.get("presenter_display", "")) or talk["authors"])
         if st.button("Show abstract", key=f"public_session_abstract_{talk_id}", use_container_width=True):
             st.session_state.abstract_open_submission_id = talk_id
             st.session_state.public_selected_paper_id = talk_id

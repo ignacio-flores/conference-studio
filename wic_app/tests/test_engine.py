@@ -953,7 +953,7 @@ class EngineTests(unittest.TestCase):
             reset = next(s for s in state_reset.sessions if s.session_code == session.session_code)
             self.assertNotEqual(reset.session_title, custom_title)
 
-    def test_paper_metadata_overrides_apply_to_title_and_author(self) -> None:
+    def test_paper_metadata_overrides_apply_to_title_author_and_moderator(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             paths = self._temp_state_paths(tmp_path)
@@ -981,6 +981,7 @@ class EngineTests(unittest.TestCase):
                         "SubmissionID": sid,
                         "TitleOverride": new_title,
                         "AuthorOverride": new_author,
+                        "IsModerator": "True",
                     }
                 ],
                 paths["metadata"],
@@ -988,11 +989,48 @@ class EngineTests(unittest.TestCase):
             loaded = load_paper_metadata_overrides(paths["metadata"])
             self.assertEqual(loaded[sid]["TitleOverride"], new_title)
             self.assertEqual(loaded[sid]["AuthorOverride"], new_author)
+            self.assertEqual(loaded[sid]["IsModerator"], "True")
 
             state_after = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
             updated = next(p for p in state_after.papers if p.submission_id == sid)
             self.assertEqual(updated.title, new_title)
             self.assertEqual(updated.full_name, new_author)
+            self.assertTrue(bool(getattr(updated, "is_moderator", False)))
+
+    def test_paper_metadata_overrides_support_legacy_rows_without_moderator_column(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (PAPER_METADATA_OVERRIDES_FILE, "metadata"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            state = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            paper = state.papers[0]
+            sid = paper.submission_id
+            legacy_title = "Legacy Title Override"
+            legacy_author = "Legacy Author Override"
+            paths["metadata"].write_text(
+                (
+                    "SubmissionID,TitleOverride,AuthorOverride,UpdatedAt\n"
+                    f"{sid},{legacy_title},{legacy_author},2026-04-01T10:00:00\n"
+                ),
+                encoding="utf-8",
+            )
+
+            state_after = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            updated = next(p for p in state_after.papers if p.submission_id == sid)
+            self.assertEqual(updated.title, legacy_title)
+            self.assertEqual(updated.full_name, legacy_author)
+            self.assertFalse(bool(getattr(updated, "is_moderator", False)))
 
     def test_paper_archive_overrides_roundtrip_and_exclusion_from_active_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

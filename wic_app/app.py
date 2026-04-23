@@ -54,6 +54,7 @@ from reclassification_engine import (
     load_session_structure_rows,
     load_session_name_overrides,
     parse_start_minutes,
+    parse_bool,
     papers_to_rows,
     programme_talk_rows,
     relabel_day_sessions,
@@ -624,6 +625,7 @@ def _apply_paper_metadata_edits_if_changed(edited_df: pd.DataFrame) -> bool:
         paper.submission_id: {
             "title": _normalize_text(paper.title),
             "author": _normalize_text(paper.full_name),
+            "is_moderator": bool(getattr(paper, "is_moderator", False)),
         }
         for paper in state.papers
     }
@@ -640,8 +642,16 @@ def _apply_paper_metadata_edits_if_changed(edited_df: pd.DataFrame) -> bool:
 
         new_title = _normalize_text(row.get("Title", ""))
         new_author = _normalize_text(row.get("FullName", ""))
+        if "IsModerator" in edited_df.columns:
+            new_is_moderator = parse_bool(str(row.get("IsModerator", "")))
+        else:
+            new_is_moderator = current_map[sid]["is_moderator"]
         current = current_map[sid]
-        if new_title == current["title"] and new_author == current["author"]:
+        if (
+            new_title == current["title"]
+            and new_author == current["author"]
+            and new_is_moderator == current["is_moderator"]
+        ):
             continue
 
         if snapshot is None:
@@ -651,6 +661,7 @@ def _apply_paper_metadata_edits_if_changed(edited_df: pd.DataFrame) -> bool:
             "SubmissionID": sid,
             "TitleOverride": new_title,
             "AuthorOverride": new_author,
+            "IsModerator": "True" if new_is_moderator else "",
             "UpdatedAt": now,
         }
         changed = True
@@ -748,6 +759,59 @@ def _apply_paper_session_selection_edit(submission_id: str, target_selection: tu
         },
         f"Moved {paper_label} to overflow in {target_label}.",
     )
+
+
+def _set_session_moderator(session_id: str, target_submission_id: str) -> bool:
+    target_session_id = _normalize_text(session_id)
+    sid = _normalize_text(target_submission_id)
+    if not target_session_id or not sid:
+        return False
+
+    state = st.session_state.wic_state
+    session = next((row for row in state.sessions if _normalize_text(getattr(row, "session_id", "")) == target_session_id), None)
+    if session is None:
+        st.error("Session is no longer available.")
+        return False
+
+    session_papers = [paper for paper in list(getattr(session, "papers", []) or []) if paper is not None]
+    if not session_papers:
+        st.error("No scheduled presenters are available in this session.")
+        return False
+
+    by_sid = {_normalize_text(getattr(paper, "submission_id", "")): paper for paper in session_papers}
+    if sid not in by_sid:
+        st.error("Moderator must be selected from scheduled presenters in this session.")
+        return False
+
+    current_moderators = [paper for paper in session_papers if bool(getattr(paper, "is_moderator", False))]
+    if len(current_moderators) == 1 and _normalize_text(getattr(current_moderators[0], "submission_id", "")) == sid:
+        return False
+
+    overrides = load_paper_metadata_overrides(PAPER_METADATA_OVERRIDES_FILE)
+    merged = dict(overrides)
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    snapshot = _snapshot_for_undo()
+
+    for paper in session_papers:
+        paper_sid = _normalize_text(getattr(paper, "submission_id", ""))
+        if not paper_sid:
+            continue
+        existing = dict(merged.get(paper_sid, {}))
+        merged[paper_sid] = {
+            "SubmissionID": paper_sid,
+            "TitleOverride": _normalize_text(existing.get("TitleOverride", "")),
+            "AuthorOverride": _normalize_text(existing.get("AuthorOverride", "")),
+            "IsModerator": "True" if paper_sid == sid else "",
+            "UpdatedAt": now,
+        }
+
+    _push_undo_snapshot(snapshot)
+    write_paper_metadata_overrides(merged.values(), PAPER_METADATA_OVERRIDES_FILE)
+
+    selected = by_sid.get(sid)
+    selected_name = _clean_display_text(getattr(selected, "full_name", "")) or sid
+    _refresh_state(f"Set moderator for {session.session_code}: {selected_name}.")
+    return True
 
 
 def _apply_session_name_override(session_code: str, title: str) -> bool:
@@ -3111,6 +3175,13 @@ def _paper_move_label(paper: object) -> str:
     return "Paper"
 
 
+def _presenter_display(paper: object) -> str:
+    presenter = _clean_display_text(getattr(paper, "full_name", "")) or "[No presenter]"
+    if bool(getattr(paper, "is_moderator", False)):
+        return f"{presenter} (Moderator)"
+    return presenter
+
+
 def _candidate_sort_key(paper: object) -> tuple:
     status = _normalize_text(getattr(paper, "placement_status", "")).lower()
     status_rank = {"unassigned": 0, "overflow": 1, "scheduled": 2}
@@ -3218,7 +3289,7 @@ def _render_programme_block_grid(
                                 st.rerun()
                             continue
 
-                        presenter = _clip_text(paper.full_name, presenter_limit)
+                        presenter = _clip_text(_presenter_display(paper), presenter_limit + 16)
                         title = _clip_text(paper.title, slot_title_limit + 36)
                         abstract_preview = _preview_abstract(paper.abstract)
                         slot_button_label = f"\"{title}\"\n({presenter})"
@@ -3247,7 +3318,7 @@ def _render_programme_block_grid(
                             ),
                             unsafe_allow_html=True,
                         )
-                        presenter = _clip_text(overflow_paper.full_name, presenter_limit)
+                        presenter = _clip_text(_presenter_display(overflow_paper), presenter_limit + 16)
                         title = _clip_text(overflow_paper.title, slot_title_limit + 36)
                         abstract_preview = _preview_abstract(overflow_paper.abstract)
                         overflow_button_label = f"\"{title}\"\n({presenter}) [!] (overflow #{overflow_order})"
@@ -3334,7 +3405,7 @@ def _render_paper_slot_inspector(
             f"#### {html.escape(title)}",
             unsafe_allow_html=True,
         )
-    presenter = _clean_display_text(paper.full_name) or "[No presenter]"
+    presenter = _presenter_display(paper)
     abstract_preview = _preview_abstract(paper.abstract)
     st.caption(f"Presenter: {presenter} - {session.time} - {session.room}")
     with st.expander("Abstract (click to expand)", expanded=False):
@@ -3592,6 +3663,7 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
         f"Session slots ({session_counts['filled']}/{session_counts['capacity']} filled)",
         expanded=False,
     ):
+        st.caption("Use one click to set the moderator among scheduled presenters.")
         for talk_idx in range(1, max(1, session.capacity) + 1):
             paper = session.papers[talk_idx - 1]
             if paper is None:
@@ -3603,16 +3675,28 @@ def _render_session_inspector(state, session: object, all_sessions: List[object]
                     _set_programme_selection("slot", session.session_id, talk_idx)
                     st.rerun()
                 continue
-            presenter = _clip_text(_clean_display_text(paper.full_name) or "[No presenter]", 52)
-            if st.button(
+            presenter = _clip_text(_presenter_display(paper), 64)
+            slot_col, moderator_col = st.columns([4.2, 1.2], gap="small")
+            if slot_col.button(
                 f"Slot {talk_idx}: {presenter}",
                 key=f"ins_open_slot_{session.session_id}_{talk_idx}",
                 use_container_width=True,
             ):
                 _set_programme_selection("slot", session.session_id, talk_idx)
                 st.rerun()
+            is_moderator = bool(getattr(paper, "is_moderator", False))
+            moderator_label = "★ Moderator" if is_moderator else "Set Moderator"
+            if moderator_col.button(
+                moderator_label,
+                key=f"ins_set_moderator_{session.session_id}_{talk_idx}",
+                type="primary" if is_moderator else "secondary",
+                help="Set this presenter as the session moderator.",
+                use_container_width=True,
+            ):
+                if _set_session_moderator(session.session_id, _normalize_text(getattr(paper, "submission_id", ""))):
+                    st.rerun()
         for overflow_order, overflow_paper in enumerate(list(getattr(session, "overflow_papers", []) or []), start=1):
-            presenter = _clip_text(_clean_display_text(overflow_paper.full_name) or "[No presenter]", 52)
+            presenter = _clip_text(_presenter_display(overflow_paper), 64)
             st.markdown(
                 (
                     "<div style='font-size:0.82rem;"
