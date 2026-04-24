@@ -311,6 +311,7 @@ class EngineTests(unittest.TestCase):
         self.assertNotIn("10h30-11h00", workbook_xml)
         self.assertNotIn("10:00-10:30", workbook_xml)
         self.assertNotIn("10:30-11:00", workbook_xml)
+        self.assertNotIn("Title Presenter Index", workbook_xml)
         self.assertIn("10h00-11h00", workbook_xml)
         self.assertIn("Title One", workbook_xml)
         self.assertLess(workbook_xml.index("Title One"), workbook_xml.index("Presenter One"))
@@ -331,6 +332,9 @@ class EngineTests(unittest.TestCase):
 
         self.assertIn(PROGRAMME_CHANGE_NOTICE, visible_text_xml)
         self.assertIn("Track 1", visible_text_xml)
+        self.assertIn("Title Presenter Index", workbook_xml)
+        self.assertIn("Presentation Title", visible_text_xml)
+        self.assertIn("Presenter Name", visible_text_xml)
         self.assertNotIn(" (Moderator)", workbook_xml)
         self.assertNotIn(">R1<", workbook_xml)
 

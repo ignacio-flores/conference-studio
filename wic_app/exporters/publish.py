@@ -831,6 +831,8 @@ def export_publish_excel(
     ordered_days = _ordered_day_labels_from_state(state)
 
     used_sheet_names = {"Cover", "Session Directory", "Paper Index", "Issues"}
+    if publish_display == PUBLISH_DISPLAY_PUBLIC_SAFE:
+        used_sheet_names.add("Title Presenter Index")
     for day_idx, day_name in enumerate(ordered_days, start=1):
         ws_day = wb.add_worksheet(_safe_sheet_name(f"Day {day_idx}", used_sheet_names))
         _write_publish_day_sheet(
@@ -934,6 +936,19 @@ def export_publish_excel(
         ws_papers.write(row_idx, 4, paper.day_label, cell_fmt)
         ws_papers.write(row_idx, 5, paper.time, cell_fmt)
         ws_papers.write(row_idx, 6, _display_room_value(paper.room, publish_display), cell_fmt)
+
+    if publish_display == PUBLISH_DISPLAY_PUBLIC_SAFE:
+        ws_titles = wb.add_worksheet("Title Presenter Index")
+        ws_titles.freeze_panes(1, 0)
+        ws_titles.set_column(0, 0, 72)
+        ws_titles.set_column(1, 1, 36)
+        ws_titles.write_row(0, 0, ["Presentation Title", "Presenter Name"], header_fmt)
+
+        sorted_papers = sorted(state.papers, key=lambda p: str(getattr(p, "submission_id", "")))
+        for row_idx, paper in enumerate(sorted_papers, start=1):
+            title, presenter = _paper_title_and_presenter(paper, include_moderator=False)
+            ws_titles.write(row_idx, 0, title, wrap_fmt)
+            ws_titles.write(row_idx, 1, presenter, cell_fmt)
 
     ws_issues = wb.add_worksheet("Issues")
     ws_issues.freeze_panes(1, 0)
