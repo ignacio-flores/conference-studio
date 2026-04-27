@@ -92,8 +92,11 @@ function sortBySessionPosition(a, b) {
 }
 
 function setTitle(conference) {
-  byId('site-title').textContent = conference?.title || 'Conference Programme';
-  byId('site-subtitle').textContent = conference?.subtitle || '';
+  const title = conference?.title || 'World Inequality Conference 2026';
+  const pageTitle = `${title}: Parallel Sessions`;
+  byId('site-title').textContent = pageTitle;
+  byId('site-subtitle').textContent = 'This programme covers parallel paper sessions only. For plenary sessions, see the official conference programme.';
+  document.title = pageTitle;
   byId('generated-at').textContent = conference?.generated_at ? `Updated: ${conference.generated_at}` : '';
 }
 
@@ -113,6 +116,18 @@ function setView(view) {
   });
   byId('programme-view').hidden = view !== 'programme';
   byId('papers-view').hidden = view !== 'papers';
+}
+
+function allSessions() {
+  return state.payload?.sessions || [];
+}
+
+function findSessionById(sessionId) {
+  const cleanSessionId = cleanText(sessionId);
+  if (!cleanSessionId) {
+    return null;
+  }
+  return allSessions().find((session) => cleanText(session.session_id) === cleanSessionId) || null;
 }
 
 function renderDaySwitcher() {
@@ -161,13 +176,24 @@ function groupSessionsForDay(dayLabel) {
 }
 
 function toggleSession(sessionId) {
-  state.expandedSessionId = state.expandedSessionId === sessionId ? '' : sessionId;
+  state.expandedSessionId = state.expandedSessionId === sessionId ? '' : cleanText(sessionId);
   state.pinnedAbstractId = '';
   renderProgramme();
 }
 
 function toggleAbstract(submissionId) {
   state.pinnedAbstractId = state.pinnedAbstractId === submissionId ? '' : submissionId;
+  const panel = byId('session-panel');
+  if (panel) {
+    renderSessionPanel(panel);
+  } else {
+    renderProgramme();
+  }
+}
+
+function closeSessionPanel() {
+  state.expandedSessionId = '';
+  state.pinnedAbstractId = '';
   renderProgramme();
 }
 
@@ -229,7 +255,6 @@ function renderSession(session) {
   const room = fragment.querySelector('.session-room');
   const title = fragment.querySelector('.session-title');
   const meta = fragment.querySelector('.session-meta');
-  const detail = fragment.querySelector('.session-detail');
   const expanded = state.expandedSessionId === session.session_id;
   const talks = session.talks || [];
   const visibleRoom = resolveRoomLabel(session);
@@ -244,11 +269,6 @@ function renderSession(session) {
   meta.textContent = metaParts.join(' · ') || cleanText(session.block_label);
   summary.setAttribute('aria-expanded', String(expanded));
   summary.addEventListener('click', () => toggleSession(session.session_id));
-  detail.hidden = !expanded;
-
-  if (expanded) {
-    talks.forEach((talk) => detail.appendChild(renderTalk(talk)));
-  }
 
   return fragment;
 }
@@ -296,50 +316,123 @@ function groupSessionsByRoom(sessions) {
   return grouped;
 }
 
-function renderStructureBlock(block, rooms) {
+function buildProgrammeMatrix(blocks) {
+  const rooms = roomsForBlocks(blocks);
+  const rows = blocks.map((block) => ({
+    ...block,
+    sessionsByRoom: groupSessionsByRoom(block.sessions),
+  }));
+  return { rooms, rows };
+}
+
+function renderProgrammeMatrix(blocks, rooms) {
   const section = document.createElement('section');
+  const layout = document.createElement('div');
   const wrapper = document.createElement('div');
   const grid = document.createElement('div');
-  const sessionsByRoom = groupSessionsByRoom(block.sessions);
+  const panel = document.createElement('aside');
 
-  section.className = 'programme-block';
-  section.innerHTML = `
-    <header class="programme-block-header">
-      <div>
-        <p class="programme-block-label">${cleanText(block.block_label)}</p>
-        <h2 class="programme-block-time">${cleanText(block.time)}</h2>
-      </div>
-    </header>
-  `;
+  section.className = 'programme-workspace';
+  layout.className = `programme-workspace-layout${state.expandedSessionId ? ' has-panel' : ''}`;
+  wrapper.className = 'programme-timetable-scroll';
+  grid.className = 'programme-timetable-grid';
+  panel.id = 'session-panel';
+  panel.className = 'session-panel';
+  panel.setAttribute('aria-live', 'polite');
+  grid.style.gridTemplateColumns = `minmax(138px, 0.7fr) repeat(${rooms.length}, minmax(190px, 1fr))`;
 
-  wrapper.className = 'programme-room-grid-wrapper';
-  grid.className = 'programme-room-grid';
-  grid.style.gridTemplateColumns = `repeat(${rooms.length}, minmax(220px, 1fr))`;
+  const corner = document.createElement('div');
+  corner.className = 'programme-timetable-corner';
+  corner.textContent = 'Time';
+  grid.appendChild(corner);
 
   rooms.forEach((room) => {
     const header = document.createElement('div');
-    header.className = 'programme-room-header';
+    header.className = 'programme-timetable-room';
     header.textContent = room.label;
     grid.appendChild(header);
   });
 
-  rooms.forEach((room) => {
-    const cell = document.createElement('div');
-    const sessions = sessionsByRoom.get(room.key) || [];
-    cell.className = 'programme-room-cell';
+  blocks.forEach((block) => {
+    const timeCell = document.createElement('div');
+    timeCell.className = 'programme-timetable-time';
+    timeCell.innerHTML = `
+      <p class="programme-block-label">${cleanText(block.block_label)}</p>
+      <p class="programme-block-time">${cleanText(block.time)}</p>
+    `;
+    grid.appendChild(timeCell);
 
-    if (!sessions.length) {
-      cell.classList.add('is-empty');
-      cell.innerHTML = '<p class="empty-room">No session</p>';
-    } else {
-      sessions.forEach((session) => cell.appendChild(renderSession(session)));
-    }
-    grid.appendChild(cell);
+    rooms.forEach((room) => {
+      const cell = document.createElement('div');
+      const sessions = block.sessionsByRoom.get(room.key) || [];
+      cell.className = 'programme-timetable-cell';
+      cell.dataset.room = room.label;
+
+      if (!sessions.length) {
+        cell.classList.add('is-empty');
+        cell.setAttribute('aria-label', `${cleanText(block.time)}: no session in ${room.label}`);
+      } else {
+        sessions.forEach((session) => cell.appendChild(renderSession(session)));
+      }
+      grid.appendChild(cell);
+    });
   });
 
   wrapper.appendChild(grid);
-  section.appendChild(wrapper);
+  layout.appendChild(wrapper);
+  layout.appendChild(panel);
+  section.appendChild(layout);
+  renderSessionPanel(panel);
   return section;
+}
+
+function renderSessionPanel(panel = byId('session-panel')) {
+  if (!panel) {
+    return;
+  }
+
+  const session = findSessionById(state.expandedSessionId);
+  panel.innerHTML = '';
+  panel.classList.toggle('is-open', Boolean(session));
+
+  if (!session) {
+    panel.innerHTML = `
+      <div class="session-panel-empty">
+        <p class="programme-block-label">Session details</p>
+        <p>Select a session in the timetable to read the presentations and abstracts.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const talks = session.talks || [];
+  const visibleRoom = resolveRoomLabel(session);
+  const theme = cleanText(session.primary_theme);
+  const metaParts = [cleanText(session.day_label), cleanText(session.time), visibleRoom, theme].filter(Boolean);
+  const header = document.createElement('header');
+  const closeButton = document.createElement('button');
+  const talkList = document.createElement('div');
+
+  header.className = 'session-panel-header';
+  header.innerHTML = `
+    <div>
+      <p class="programme-block-label">Session details</p>
+      <h2 class="session-panel-title">${cleanText(session.session_title) || '[Untitled session]'}</h2>
+      <p class="session-panel-meta">${metaParts.join(' · ')}</p>
+    </div>
+  `;
+
+  closeButton.type = 'button';
+  closeButton.className = 'session-panel-close';
+  closeButton.setAttribute('aria-label', 'Close session details');
+  closeButton.textContent = 'Close';
+  closeButton.addEventListener('click', closeSessionPanel);
+  header.appendChild(closeButton);
+  panel.appendChild(header);
+
+  talkList.className = 'session-panel-talks';
+  talks.forEach((talk) => talkList.appendChild(renderTalk(talk)));
+  panel.appendChild(talkList);
 }
 
 function renderFallbackBlock(block) {
@@ -357,6 +450,15 @@ function renderFallbackBlock(block) {
 
   const grid = section.querySelector('.programme-block-grid');
   block.sessions.forEach((session) => grid.appendChild(renderSession(session)));
+  if (state.expandedSessionId) {
+    const session = block.sessions.find((candidate) => cleanText(candidate.session_id) === state.expandedSessionId);
+    if (session) {
+      const detail = document.createElement('div');
+      detail.className = 'session-detail';
+      (session.talks || []).forEach((talk) => detail.appendChild(renderTalk(talk)));
+      section.appendChild(detail);
+    }
+  }
   return section;
 }
 
@@ -389,7 +491,8 @@ function focusProgrammeLocation() {
 function renderProgramme() {
   const host = byId('programme-view');
   const blocks = groupSessionsForDay(state.activeDay);
-  const rooms = roomsForBlocks(blocks);
+  const matrix = buildProgrammeMatrix(blocks);
+  const rooms = matrix.rooms;
   const hasVisibleRooms = rooms.some((room) => room.label);
   host.innerHTML = '';
 
@@ -398,9 +501,11 @@ function renderProgramme() {
     return;
   }
 
-  blocks.forEach((block) => {
-    host.appendChild(hasVisibleRooms ? renderStructureBlock(block, rooms) : renderFallbackBlock(block));
-  });
+  if (hasVisibleRooms) {
+    host.appendChild(renderProgrammeMatrix(matrix.rows, rooms));
+  } else {
+    blocks.forEach((block) => host.appendChild(renderFallbackBlock(block)));
+  }
 
   focusProgrammeLocation();
 }
