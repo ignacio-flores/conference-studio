@@ -360,12 +360,30 @@ def _write_ui_settings(payload: Dict[str, object]) -> None:
     UI_SETTINGS_FILE.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def _publish_public_bundle(state) -> Path:
-    return assemble_public_bundle(state)
+def _publish_public_bundle(
+    state,
+    *,
+    publish_display: str = "full",
+    show_links: bool = True,
+) -> Path:
+    return assemble_public_bundle(
+        state,
+        publish_display=publish_display,
+        show_links=show_links,
+    )
 
 
-def _preview_public_bundle(state) -> Dict[str, object]:
-    bundle_path = assemble_public_bundle(state)
+def _preview_public_bundle(
+    state,
+    *,
+    publish_display: str = "full",
+    show_links: bool = True,
+) -> Dict[str, object]:
+    bundle_path = assemble_public_bundle(
+        state,
+        publish_display=publish_display,
+        show_links=show_links,
+    )
     return ensure_public_bundle_preview(bundle_path)
 
 

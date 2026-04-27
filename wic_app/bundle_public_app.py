@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from exporters.publish import export_public_excel, export_public_payload
+from exporters.publish import PUBLISH_DISPLAY_FULL, export_public_payload, export_publish_excel
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -31,13 +31,21 @@ Files:
 - `www/index.html`: public site shell
 - `www/assets/`: static CSS and JavaScript
 - `www/data/programme.json`: public programme dataset
-- `www/programme.xlsx`: public workbook download
+- `www/programme.xlsx`: publish workbook download
 
 This bundle is intended to be copied into a separate public repository or uploaded directly to a static server.
 """
 
 
-def assemble_public_bundle(state, output_dir: Path = PUBLIC_BUNDLE_DIR) -> Path:
+def assemble_public_bundle(
+    state,
+    output_dir: Path = PUBLIC_BUNDLE_DIR,
+    *,
+    publish_display: str = PUBLISH_DISPLAY_FULL,
+    show_rooms: bool | None = None,
+    show_moderators: bool | None = None,
+    show_links: bool = True,
+) -> Path:
     output_dir = Path(output_dir).resolve()
     bundle_www_dir = output_dir / "www"
     bundle_assets_dir = bundle_www_dir / "assets"
@@ -53,8 +61,20 @@ def assemble_public_bundle(state, output_dir: Path = PUBLIC_BUNDLE_DIR) -> Path:
     shutil.copy2(PUBLIC_WWW_SOURCE_DIR / "assets" / "styles.css", bundle_assets_dir / "styles.css")
     shutil.copy2(PUBLIC_WWW_SOURCE_DIR / "assets" / "app.js", bundle_assets_dir / "app.js")
 
-    export_public_payload(state, bundle_data_dir / "programme.json")
-    export_public_excel(state, bundle_www_dir / "programme.xlsx")
+    export_public_payload(
+        state,
+        bundle_data_dir / "programme.json",
+        publish_display=publish_display,
+        show_rooms=show_rooms,
+        show_moderators=show_moderators,
+        show_links=show_links,
+    )
+    export_publish_excel(
+        state,
+        bundle_www_dir / "programme.xlsx",
+        publish_display=publish_display,
+        show_links=show_links,
+    )
 
     (output_dir / "README.md").write_text(_bundle_readme_text(), encoding="utf-8")
 

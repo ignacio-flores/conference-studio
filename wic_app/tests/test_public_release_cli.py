@@ -37,6 +37,9 @@ class PublicReleaseCliTests(unittest.TestCase):
                     "--publish",
                     "--publish-display",
                     "public_safe",
+                    "--no-public-rooms",
+                    "--no-public-moderators",
+                    "--public-links",
                     "--config",
                     str(config_path),
                 ],
@@ -49,6 +52,7 @@ class PublicReleaseCliTests(unittest.TestCase):
             output = (completed.stdout or "") + (completed.stderr or "")
             self.assertEqual(completed.returncode, 0, output[-4000:])
             self.assertIn("Publish display mode: public_safe", output)
+            self.assertIn("Public export settings: rooms=hidden, moderators=hidden, links=shown", output)
             self.assertIn("Generated public JSON", output)
             self.assertIn("Generated public workbook", output)
             self.assertTrue(
@@ -57,6 +61,16 @@ class PublicReleaseCliTests(unittest.TestCase):
             )
             self.assertTrue((tmp_path / "programme.json").exists())
             self.assertTrue((tmp_path / "programme_public.xlsx").exists())
+            payload = json.loads((tmp_path / "programme.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                payload["public_settings"],
+                {
+                    "publish_display": "public_safe",
+                    "show_rooms": False,
+                    "show_moderators": False,
+                    "show_links": True,
+                },
+            )
 
 
 if __name__ == "__main__":

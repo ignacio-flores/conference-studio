@@ -56,6 +56,29 @@ def main() -> None:
         default=PUBLISH_DISPLAY_FULL,
         help="Publish display mode: full or public_safe.",
     )
+    parser.add_argument(
+        "--public-rooms",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Show room names in public JSON/XLSX outputs. Defaults to the legacy mapping from --publish-display.",
+    )
+    parser.add_argument(
+        "--public-moderators",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Show moderator labels in public JSON/XLSX outputs. Defaults to the legacy mapping from --publish-display.",
+    )
+    parser.add_argument(
+        "--public-links",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Show paper URLs in public JSON/XLSX outputs when available.",
+    )
+    parser.add_argument(
+        "--hide-public-links",
+        action="store_true",
+        help="Legacy alias to hide paper URLs in public JSON/XLSX outputs.",
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config).expanduser().resolve() if args.config else None
@@ -89,12 +112,53 @@ def main() -> None:
         print(f"Missing papers: {validations['missing_submission_ids']}")
 
     if args.publish:
+        public_show_rooms = (
+            args.public_rooms
+            if args.public_rooms is not None
+            else args.publish_display == PUBLISH_DISPLAY_FULL
+        )
+        public_show_moderators = (
+            args.public_moderators
+            if args.public_moderators is not None
+            else args.publish_display == PUBLISH_DISPLAY_FULL
+        )
+        public_show_links = True
+        if args.public_links is not None:
+            public_show_links = bool(args.public_links)
+        if args.hide_public_links:
+            public_show_links = False
+
         print(f"Publish display mode: {args.publish_display}")
-        public_json_path = export_public_payload(state, public_json_output)
+        print(
+            "Public export settings: "
+            f"rooms={'shown' if public_show_rooms else 'hidden'}, "
+            f"moderators={'shown' if public_show_moderators else 'hidden'}, "
+            f"links={'shown' if public_show_links else 'hidden'}"
+        )
+        public_json_path = export_public_payload(
+            state,
+            public_json_output,
+            conference_config=conference_config,
+            show_rooms=public_show_rooms,
+            show_moderators=public_show_moderators,
+            show_links=public_show_links,
+        )
         print(f"Generated public JSON: {public_json_path}")
-        public_xlsx_path = export_public_excel(state, public_xlsx_output)
+        public_xlsx_path = export_public_excel(
+            state,
+            public_xlsx_output,
+            conference_config=conference_config,
+            show_rooms=public_show_rooms,
+            show_moderators=public_show_moderators,
+            show_links=public_show_links,
+        )
         print(f"Generated public workbook: {public_xlsx_path}")
-        xlsx_path = export_publish_excel(state, publish_xlsx_output, publish_display=args.publish_display)
+        xlsx_path = export_publish_excel(
+            state,
+            publish_xlsx_output,
+            publish_display=args.publish_display,
+            show_links=public_show_links,
+        )
         print(f"Generated publish workbook: {xlsx_path}")
         try:
             docx_path = export_publish_docx(state, publish_docx_output, publish_display=args.publish_display)

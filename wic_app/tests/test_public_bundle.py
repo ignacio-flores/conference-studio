@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +16,14 @@ from reclassification_engine import build_programme_state
 
 
 class PublicBundleTests(unittest.TestCase):
+    def _zip_text(self, archive_path: Path, suffixes: tuple[str, ...]) -> str:
+        with zipfile.ZipFile(archive_path) as archive:
+            return "\n".join(
+                archive.read(name).decode("utf-8", errors="ignore")
+                for name in archive.namelist()
+                if name.endswith(suffixes)
+            )
+
     def test_assemble_public_bundle_creates_static_www_files(self) -> None:
         state = build_programme_state()
         with tempfile.TemporaryDirectory() as tmp:
@@ -44,6 +54,55 @@ class PublicBundleTests(unittest.TestCase):
         self.assertIn("www/", readme_text)
         self.assertIn("static", readme_text.lower())
         self.assertNotIn("streamlit run", readme_text)
+
+    def test_public_bundle_threads_public_visibility_settings_into_payload(self) -> None:
+        state = build_programme_state()
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle_path = assemble_public_bundle(
+                state,
+                output_dir=Path(tmp) / "public_bundle",
+                publish_display="public_safe",
+                show_links=False,
+            )
+            payload = json.loads((bundle_path / "www" / "data" / "programme.json").read_text(encoding="utf-8"))
+            workbook_xml = self._zip_text(bundle_path / "www" / "programme.xlsx", (".xml", ".rels"))
+            visible_text_xml = self._zip_text(bundle_path / "www" / "programme.xlsx", ("sharedStrings.xml",))
+
+        self.assertEqual(
+            payload["public_settings"],
+            {
+                "publish_display": "public_safe",
+                "show_rooms": False,
+                "show_moderators": False,
+                "show_links": False,
+            },
+        )
+        self.assertTrue(all(str(session.get("display_room", "")).startswith("Track ") for session in payload["sessions"]))
+        self.assertTrue(all("link_to_pdf" not in paper for paper in payload["papers"]))
+        self.assertTrue(all(not str(paper.get("paper_url", "")).strip() for paper in payload["papers"]))
+        self.assertNotIn("Session Directory", workbook_xml)
+        self.assertNotIn("Paper Index", workbook_xml)
+        self.assertNotIn("Issues", workbook_xml)
+        self.assertNotIn("Title Presenter Index", workbook_xml)
+        self.assertIn("Track 1", visible_text_xml)
+        self.assertNotIn("PaperURL", visible_text_xml)
+
+    def test_public_bundle_download_workbook_uses_publish_workbook_and_can_show_links(self) -> None:
+        state = build_programme_state()
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle_path = assemble_public_bundle(
+                state,
+                output_dir=Path(tmp) / "public_bundle",
+                publish_display="full",
+                show_links=True,
+            )
+            workbook_xml = self._zip_text(bundle_path / "www" / "programme.xlsx", (".xml", ".rels"))
+            visible_text_xml = self._zip_text(bundle_path / "www" / "programme.xlsx", ("sharedStrings.xml",))
+
+        self.assertNotIn("Session Directory", workbook_xml)
+        self.assertNotIn("Paper Index", workbook_xml)
+        self.assertNotIn("Issues", workbook_xml)
+        self.assertNotIn("PaperURL", visible_text_xml)
 
     def test_public_bundle_default_path_is_repo_local(self) -> None:
         expected = APP_ROOT.parent / "public_bundle"

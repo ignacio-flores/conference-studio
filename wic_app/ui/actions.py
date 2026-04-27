@@ -46,11 +46,21 @@ def render_top_actions(
                 "Rooms and moderator labels will be hidden in publish Excel, PDF, and Word exports."
             )
 
+        public_show_links = st.checkbox(
+            "Show paper links in public exports and publish Excel",
+            value=True,
+            key="public_show_links",
+        )
+
         if st.button("Publish (Excel + PDF + Word)", type="primary", use_container_width=True):
             try:
                 if not_edited_count > 0:
                     st.warning(f"Publishing with {not_edited_count} not-edited papers.")
-                xlsx_path = export_publish_excel(state, publish_display=publish_display)
+                xlsx_path = export_publish_excel(
+                    state,
+                    publish_display=publish_display,
+                    show_links=public_show_links,
+                )
                 docx_path = export_publish_docx(state, publish_display=publish_display)
                 pdf_path = export_publish_pdf(state, publish_display=publish_display)
                 st.success(f"Publish Excel: {xlsx_path}")
@@ -61,14 +71,22 @@ def render_top_actions(
 
         if st.button("Prepare Public Bundle", use_container_width=True):
             try:
-                bundle_path = publish_public_bundle(state)
+                bundle_path = publish_public_bundle(
+                    state,
+                    publish_display=publish_display,
+                    show_links=public_show_links,
+                )
                 st.success(f"Public bundle ready: {bundle_path}")
             except Exception as exc:
                 st.error(f"Public bundle failed: {exc}")
 
         if st.button("Preview Public Bundle", use_container_width=True):
             try:
-                preview_details = preview_public_bundle(state)
+                preview_details = preview_public_bundle(
+                    state,
+                    publish_display=publish_display,
+                    show_links=public_show_links,
+                )
                 st.session_state.public_bundle_preview_url = preview_details["url"]
                 st.session_state.public_bundle_preview_started = bool(preview_details.get("started", False))
             except Exception as exc:

@@ -171,15 +171,144 @@ class PublicDataTests(unittest.TestCase):
         payload = build_public_payload(state, conference, generated_at="2026-03-18T12:00:00")
 
         self.assertEqual(payload["conference"]["generated_at"], "2026-03-18T12:00:00")
+        self.assertEqual(payload["public_settings"]["publish_display"], "full")
+        self.assertTrue(payload["public_settings"]["show_rooms"])
+        self.assertTrue(payload["public_settings"]["show_moderators"])
+        self.assertTrue(payload["public_settings"]["show_links"])
         self.assertEqual([session["session_id"] for session in payload["sessions"]], ["S1"])
         self.assertEqual([paper["submission_id"] for paper in payload["papers"]], ["P1"])
         self.assertEqual(payload["filters"]["rooms"], ["R1"])
 
         session_talk = payload["sessions"][0]["talks"][0]
         self.assertEqual(session_talk["submission_id"], "P1")
+        self.assertEqual(session_talk["room"], "R1")
+        self.assertEqual(session_talk["display_room"], "R1")
+        self.assertEqual(session_talk["display_presenter"], "Author P1")
+        self.assertEqual(session_talk["paper_url"], "https://private.example/P1.pdf")
         for forbidden_key in ("email", "reviewer_score", "link_to_pdf", "override_notes", "rationale"):
             self.assertNotIn(forbidden_key, session_talk)
             self.assertNotIn(forbidden_key, payload["papers"][0])
+
+    def test_build_public_payload_applies_public_safe_display_and_link_override(self) -> None:
+        conference = load_conference_config()
+        paper = _paper(
+            "P9",
+            session_id="S9",
+            session_code="D1-B1-R9",
+            session_title="Session S9",
+            day_label="Day 1",
+            day_num=1,
+            time="10h00-11h00",
+            block_label="SESSION 1",
+            block_num=1,
+            room="R9",
+        )
+        paper.is_moderator = True
+        session = _session(
+            "S9",
+            status="active",
+            paper=paper,
+            day_label="Day 1",
+            day_num=1,
+            time="10h00-11h00",
+            block_label="SESSION 1",
+            block_num=1,
+            room="R9",
+        )
+        state = SimpleNamespace(
+            papers=[paper],
+            sessions=[session],
+            inactive_sessions=[],
+            archived_papers=[],
+            validations={},
+            unassigned_papers=[],
+            slot_conflicts=[],
+            edited_submission_ids=set(),
+        )
+
+        payload = build_public_payload(
+            state,
+            conference,
+            publish_display="public_safe",
+            show_links=True,
+        )
+
+        self.assertEqual(payload["public_settings"]["publish_display"], "public_safe")
+        self.assertFalse(payload["public_settings"]["show_rooms"])
+        self.assertFalse(payload["public_settings"]["show_moderators"])
+        self.assertTrue(payload["public_settings"]["show_links"])
+        self.assertEqual(payload["filters"]["rooms"], ["Track 1"])
+        self.assertEqual(payload["sessions"][0]["room"], "")
+        self.assertEqual(payload["sessions"][0]["display_room"], "Track 1")
+        talk = payload["sessions"][0]["talks"][0]
+        self.assertFalse(talk["is_moderator"])
+        self.assertEqual(talk["room"], "")
+        self.assertEqual(talk["display_room"], "Track 1")
+        self.assertEqual(talk["presenter_display"], "Author P9")
+        self.assertEqual(talk["display_presenter"], "Author P9")
+        self.assertEqual(talk["paper_url"], "https://private.example/P9.pdf")
+        self.assertNotIn("link_to_pdf", talk)
+
+    def test_build_public_payload_includes_overflow_papers_as_regular_public_talks(self) -> None:
+        conference = load_conference_config()
+        scheduled = _paper(
+            "P1",
+            session_id="S1",
+            session_code="D1-B1-R1",
+            session_title="Session S1",
+            day_label="Day 1",
+            day_num=1,
+            time="10h00-11h00",
+            block_label="SESSION 1",
+            block_num=1,
+            room="R1",
+        )
+        overflow = _paper(
+            "P2",
+            session_id="S1",
+            session_code="D1-B1-R1",
+            session_title="Session S1",
+            day_label="Day 1",
+            day_num=1,
+            time="10h00-11h00",
+            block_label="SESSION 1",
+            block_num=1,
+            room="R1",
+            placement_status="overflow",
+        )
+        overflow.talk_index = 0
+        overflow.overflow_order = 1
+        overflow.talk_start_min = 0
+        overflow.talk_end_min = 0
+        session = _session(
+            "S1",
+            status="active",
+            paper=scheduled,
+            day_label="Day 1",
+            day_num=1,
+            time="10h00-11h00",
+            block_label="SESSION 1",
+            block_num=1,
+            room="R1",
+        )
+        session.overflow_papers = [overflow]
+        state = SimpleNamespace(
+            papers=[scheduled, overflow],
+            sessions=[session],
+            inactive_sessions=[],
+            archived_papers=[],
+            validations={},
+            unassigned_papers=[],
+            slot_conflicts=[],
+            edited_submission_ids=set(),
+        )
+
+        payload = build_public_payload(state, conference)
+
+        self.assertEqual([talk["submission_id"] for talk in payload["sessions"][0]["talks"]], ["P1", "P2"])
+        self.assertEqual([paper["submission_id"] for paper in payload["papers"]], ["P1", "P2"])
+        self.assertEqual(payload["sessions"][0]["talks"][1]["talk_start_min"], 600)
+        self.assertEqual(payload["sessions"][0]["talks"][1]["talk_end_min"], 660)
 
     def test_write_public_payload_persists_json_snapshot(self) -> None:
         payload = {
@@ -187,6 +316,18 @@ class PublicDataTests(unittest.TestCase):
                 "title": "Test Conference",
                 "subtitle": "Public Programme",
                 "generated_at": "2026-03-18T12:00:00",
+            },
+            "public_settings": {
+                "publish_display": "full",
+                "show_rooms": True,
+                "show_moderators": True,
+                "show_links": True,
+            },
+            "settings": {
+                "publish_display": "full",
+                "show_rooms": True,
+                "show_moderators": True,
+                "show_links": True,
             },
             "sessions": [],
             "papers": [],

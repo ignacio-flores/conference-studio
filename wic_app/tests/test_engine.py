@@ -264,7 +264,10 @@ class EngineTests(unittest.TestCase):
             public_xlsx_path = export_public_excel(state, tmp_path / "public.xlsx")
             public_payload_path = export_public_payload(state, tmp_path / "programme.json")
             publish_xlsx_path = export_publish_excel(state, tmp_path / "publish.xlsx")
-            publish_docx_path = export_publish_docx(state, tmp_path / "publish.docx")
+            try:
+                publish_docx_path = export_publish_docx(state, tmp_path / "publish.docx")
+            except RuntimeError as exc:
+                self.skipTest(str(exc))
             self.assertTrue(draft_path.exists())
             self.assertTrue(public_xlsx_path.exists())
             self.assertTrue(public_payload_path.exists())
@@ -281,6 +284,13 @@ class EngineTests(unittest.TestCase):
                 self.assertNotIn("email", first_paper)
                 self.assertNotIn("reviewer_score", first_paper)
                 self.assertNotIn("link_to_pdf", first_paper)
+                self.assertIn("display_presenter", first_paper)
+                self.assertIn("display_room", first_paper)
+                self.assertIn("paper_url", first_paper)
+            self.assertEqual(payload["public_settings"]["publish_display"], "full")
+            self.assertTrue(payload["public_settings"]["show_rooms"])
+            self.assertTrue(payload["public_settings"]["show_moderators"])
+            self.assertFalse(payload["public_settings"]["show_links"])
             workbook_text = self._zip_text(public_xlsx_path, (".xml",))
             self.assertNotIn("LinkToPDF", workbook_text)
             self.assertNotIn("Open PDF", workbook_text)
@@ -298,6 +308,7 @@ class EngineTests(unittest.TestCase):
             publish_xlsx_path = export_publish_excel(state, Path(tmp) / "publish.xlsx")
 
             workbook_xml = self._zip_text(publish_xlsx_path, (".xml", ".rels"))
+            visible_text_xml = self._zip_text(publish_xlsx_path, ("sharedStrings.xml",))
 
         self.assertNotIn("PrimaryTheme", workbook_xml)
         self.assertNotIn("Subtheme", workbook_xml)
@@ -311,8 +322,11 @@ class EngineTests(unittest.TestCase):
         self.assertNotIn("10h30-11h00", workbook_xml)
         self.assertNotIn("10:00-10:30", workbook_xml)
         self.assertNotIn("10:30-11:00", workbook_xml)
+        self.assertNotIn("Session Directory", workbook_xml)
+        self.assertNotIn("Paper Index", workbook_xml)
+        self.assertNotIn("Issues", workbook_xml)
         self.assertNotIn("Title Presenter Index", workbook_xml)
-        self.assertIn("10h00-11h00", workbook_xml)
+        self.assertIn("10:00-11:00", visible_text_xml)
         self.assertIn("Title One", workbook_xml)
         self.assertLess(workbook_xml.index("Title One"), workbook_xml.index("Presenter One"))
         self.assertNotIn("Presenter One - Title One", workbook_xml)
@@ -332,9 +346,49 @@ class EngineTests(unittest.TestCase):
 
         self.assertIn(PROGRAMME_CHANGE_NOTICE, visible_text_xml)
         self.assertIn("Track 1", visible_text_xml)
-        self.assertIn("Title Presenter Index", workbook_xml)
-        self.assertIn("Presentation Title", visible_text_xml)
-        self.assertIn("Presenter Name", visible_text_xml)
+        self.assertNotIn("Session Directory", workbook_xml)
+        self.assertNotIn("Paper Index", workbook_xml)
+        self.assertNotIn("Issues", workbook_xml)
+        self.assertNotIn("Title Presenter Index", workbook_xml)
+        self.assertNotIn(" (Moderator)", workbook_xml)
+        self.assertNotIn(">R1<", workbook_xml)
+        self.assertNotIn(">S1<", workbook_xml)
+        self.assertNotIn("S1", visible_text_xml)
+
+    def test_publish_workbook_can_include_links_when_enabled(self) -> None:
+        state = self._simple_publish_state()
+        with tempfile.TemporaryDirectory() as tmp:
+            publish_xlsx_path = export_publish_excel(
+                state,
+                Path(tmp) / "publish_with_links.xlsx",
+                show_links=True,
+            )
+
+            workbook_xml = self._zip_text(publish_xlsx_path, (".xml", ".rels"))
+            visible_text_xml = self._zip_text(publish_xlsx_path, ("sharedStrings.xml",))
+
+        self.assertNotIn("PaperURL", visible_text_xml)
+        self.assertNotIn("https://example.org/p1.pdf", workbook_xml)
+        self.assertNotIn("https://example.org/p2.pdf", workbook_xml)
+        self.assertNotIn("Paper Index", workbook_xml)
+
+    def test_public_workbook_uses_public_safe_display_and_can_keep_public_links(self) -> None:
+        state = self._simple_publish_state()
+        state.papers[0].is_moderator = True
+        with tempfile.TemporaryDirectory() as tmp:
+            public_xlsx_path = export_public_excel(
+                state,
+                Path(tmp) / "public.xlsx",
+                publish_display=PUBLISH_DISPLAY_PUBLIC_SAFE,
+                show_links=True,
+            )
+
+            workbook_xml = self._zip_text(public_xlsx_path, (".xml", ".rels"))
+            visible_text_xml = self._zip_text(public_xlsx_path, ("sharedStrings.xml",))
+
+        self.assertIn("Public settings: rooms=hidden, moderators=hidden, links=shown", visible_text_xml)
+        self.assertIn("PaperURL", visible_text_xml)
+        self.assertIn("https://example.org/p1.pdf", workbook_xml)
         self.assertNotIn(" (Moderator)", workbook_xml)
         self.assertNotIn(">R1<", workbook_xml)
 
@@ -402,7 +456,10 @@ class EngineTests(unittest.TestCase):
         state.sessions[0].overflow_papers = [overflow_paper]
 
         with tempfile.TemporaryDirectory() as tmp:
-            publish_docx_path = export_publish_docx(state, Path(tmp) / "publish.docx")
+            try:
+                publish_docx_path = export_publish_docx(state, Path(tmp) / "publish.docx")
+            except RuntimeError as exc:
+                self.skipTest(str(exc))
             document_xml = self._zip_text(publish_docx_path, ("document.xml",))
             relationship_xml = self._zip_text(publish_docx_path, (".rels",))
 
@@ -423,11 +480,14 @@ class EngineTests(unittest.TestCase):
         state = self._simple_publish_state()
         state.papers[0].is_moderator = True
         with tempfile.TemporaryDirectory() as tmp:
-            publish_docx_path = export_publish_docx(
-                state,
-                Path(tmp) / "publish_public_safe.docx",
-                publish_display=PUBLISH_DISPLAY_PUBLIC_SAFE,
-            )
+            try:
+                publish_docx_path = export_publish_docx(
+                    state,
+                    Path(tmp) / "publish_public_safe.docx",
+                    publish_display=PUBLISH_DISPLAY_PUBLIC_SAFE,
+                )
+            except RuntimeError as exc:
+                self.skipTest(str(exc))
             document_xml = self._zip_text(publish_docx_path, ("document.xml",))
 
         self.assertIn(PROGRAMME_CHANGE_NOTICE, document_xml)

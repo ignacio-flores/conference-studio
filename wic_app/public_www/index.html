@@ -40,10 +40,7 @@
   <template id="session-detail-template">
     <article class="session-card">
       <button type="button" class="session-summary">
-        <div class="session-meta-row">
-          <span class="session-room"></span>
-          <span class="session-time"></span>
-        </div>
+        <p class="session-room"></p>
         <h3 class="session-title"></h3>
         <p class="session-meta"></p>
       </button>
@@ -53,10 +50,12 @@
 
   <template id="talk-row-template">
     <article class="talk-row">
-      <button type="button" class="talk-toggle">
-        <span class="talk-title"></span>
+      <div class="talk-heading">
+        <a class="talk-title talk-title-link" href="#" target="_blank" rel="noreferrer noopener" hidden>Paper title</a>
+        <span class="talk-title talk-title-text">Paper title</span>
         <span class="talk-authors"></span>
-      </button>
+      </div>
+      <button type="button" class="abstract-toggle">Show abstract</button>
       <div class="abstract-panel" hidden></div>
     </article>
   </template>

@@ -12,7 +12,13 @@ import xlsxwriter
 from engine.config import load_conference_config
 from engine.scheduling import build_equal_time_ranges
 from exporters.common import group_sessions_by_day_block, ordered_sessions, paper_row_lookup
-from public_data import PUBLIC_JSON_FILE, PUBLIC_XLSX_FILE, build_public_payload, write_public_payload
+from public_data import (
+    PUBLIC_JSON_FILE,
+    PUBLIC_XLSX_FILE,
+    build_public_payload,
+    resolve_public_export_settings,
+    write_public_payload,
+)
 from reclassification_engine import (
     DAY_ORDER,
     DRAFT_OUTPUT_FILE,
@@ -64,6 +70,18 @@ def _display_room_value(room: object, publish_display: str) -> str:
     return str(room or "").strip()
 
 
+def _display_session_code_value(session_code: object, publish_display: str) -> str:
+    if normalize_publish_display_mode(publish_display) == PUBLISH_DISPLAY_PUBLIC_SAFE:
+        return ""
+    return str(session_code or "").strip()
+
+
+def _session_heading_text(session, publish_display: str) -> str:
+    title = str(getattr(session, "session_title", "") or "").strip() or "[Untitled session]"
+    session_code = _display_session_code_value(getattr(session, "session_code", ""), publish_display)
+    return f"{session_code} | {title}" if session_code else title
+
+
 def _session_slot_ranges(session) -> List[Tuple[int, int]]:
     capacity = max(1, int(getattr(session, "capacity", len(getattr(session, "papers", [])) or 1)))
     return build_equal_time_ranges(
@@ -81,10 +99,10 @@ def _session_block_bounds(session) -> Tuple[int, int]:
     return start_min, end_min
 
 
-def _build_agenda_cell(session) -> str:
+def _build_agenda_cell(session, publish_display: str = PUBLISH_DISPLAY_FULL) -> str:
     if session is None:
         return ""
-    lines = [f"{session.session_code} | {session.session_title}"]
+    lines = [_session_heading_text(session, publish_display)]
     slot_ranges = _session_slot_ranges(session)
     for idx, paper in enumerate(session.papers, start=1):
         if idx - 1 < len(slot_ranges):
@@ -157,6 +175,7 @@ def _write_session_programme_cell(
     cell_fmt,
     presenter_fmt,
     session_fmt,
+    publish_display: str = PUBLISH_DISPLAY_FULL,
     include_moderator: bool = True,
 ) -> None:
     if session is None:
@@ -165,12 +184,12 @@ def _write_session_programme_cell(
 
     presentation_papers = _session_presentation_papers(session)
     if not presentation_papers:
-        ws.write(row, col, f"{session.session_code} | {session.session_title}", cell_fmt)
+        ws.write(row, col, _session_heading_text(session, publish_display), cell_fmt)
         return
 
     fragments: List[object] = [
         session_fmt,
-        f"{session.session_code} | {session.session_title}",
+        _session_heading_text(session, publish_display),
     ]
     for paper in presentation_papers:
         title, presenter = _paper_title_and_presenter(paper, include_moderator=include_moderator)
@@ -385,6 +404,7 @@ def _write_publish_day_sheet(
                 fmts["wrap"],
                 fmts["presenter_text"],
                 fmts["session_text"],
+                publish_display=publish_display,
                 include_moderator=show_moderator_labels,
             )
         row += 2
@@ -667,16 +687,55 @@ def export_draft_workbook(state: ProgrammeState, output_path: Path = DRAFT_OUTPU
     return output_path
 
 
-def export_public_payload(state: ProgrammeState, output_path: Path = PUBLIC_JSON_FILE) -> Path:
-    conference = load_conference_config()
-    payload = build_public_payload(state, conference)
+def export_public_payload(
+    state: ProgrammeState,
+    output_path: Path = PUBLIC_JSON_FILE,
+    *,
+    conference_config=None,
+    publish_display: str = PUBLISH_DISPLAY_FULL,
+    show_rooms: Optional[bool] = None,
+    show_moderators: Optional[bool] = None,
+    show_links: Optional[bool] = None,
+) -> Path:
+    conference = conference_config or load_conference_config()
+    payload = build_public_payload(
+        state,
+        conference,
+        publish_display=publish_display,
+        show_rooms=show_rooms,
+        show_moderators=show_moderators,
+        show_links=show_links,
+    )
     return write_public_payload(payload, output_path)
 
 
-def export_public_excel(state: ProgrammeState, output_path: Path = PUBLIC_XLSX_FILE) -> Path:
+def export_public_excel(
+    state: ProgrammeState,
+    output_path: Path = PUBLIC_XLSX_FILE,
+    *,
+    conference_config=None,
+    publish_display: str = PUBLISH_DISPLAY_FULL,
+    show_rooms: Optional[bool] = None,
+    show_moderators: Optional[bool] = None,
+    show_links: Optional[bool] = None,
+) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    conference = load_conference_config()
-    payload = build_public_payload(state, conference)
+    conference = conference_config or load_conference_config()
+    payload = build_public_payload(
+        state,
+        conference,
+        publish_display=publish_display,
+        show_rooms=show_rooms,
+        show_moderators=show_moderators,
+        show_links=show_links,
+    )
+    public_settings = resolve_public_export_settings(
+        public_settings=payload.get("public_settings"),
+        publish_display=publish_display,
+        show_rooms=show_rooms,
+        show_moderators=show_moderators,
+        show_links=show_links,
+    )
 
     wb = xlsxwriter.Workbook(str(output_path))
     title_fmt = wb.add_format({"bold": True, "font_size": 20})
@@ -693,6 +752,15 @@ def export_public_excel(state: ProgrammeState, output_path: Path = PUBLIC_XLSX_F
     ws_cover.write(6, 0, "This workbook is a public read-only programme export.", cell_fmt)
     ws_cover.write(8, 0, f"Sessions: {len(payload['sessions'])}", cell_fmt)
     ws_cover.write(9, 0, f"Papers: {len(payload['papers'])}", cell_fmt)
+    ws_cover.write(
+        11,
+        0,
+        "Public settings: "
+        f"rooms={'shown' if public_settings['show_rooms'] else 'hidden'}, "
+        f"moderators={'shown' if public_settings['show_moderators'] else 'hidden'}, "
+        f"links={'shown' if public_settings['show_links'] else 'hidden'}",
+        cell_fmt,
+    )
 
     ws_sessions = wb.add_worksheet("Sessions")
     session_headers = [
@@ -719,22 +787,26 @@ def export_public_excel(state: ProgrammeState, output_path: Path = PUBLIC_XLSX_F
         ws_sessions.write(row_idx, 2, session["day_label"], cell_fmt)
         ws_sessions.write(row_idx, 3, session["time"], cell_fmt)
         ws_sessions.write(row_idx, 4, session["block_label"], wrap_fmt)
-        ws_sessions.write(row_idx, 5, session["room"], cell_fmt)
+        ws_sessions.write(row_idx, 5, session.get("display_room", session["room"]), cell_fmt)
         ws_sessions.write(row_idx, 6, session["primary_theme"], wrap_fmt)
         ws_sessions.write(row_idx, 7, session["subtheme"], wrap_fmt)
         ws_sessions.write(
             row_idx,
             8,
-            "\n".join(f"{talk.get('presenter_display', talk['authors'])} - {talk['title']}" for talk in session["talks"]),
+            "\n".join(
+                f"{talk.get('display_presenter', talk.get('presenter_display', talk['authors']))} - {talk['title']}"
+                for talk in session["talks"]
+            ),
             wrap_fmt,
         )
 
     ws_papers = wb.add_worksheet("Papers")
     paper_headers = [
         "SubmissionID",
-        "Authors",
+        "Presenter",
         "Title",
         "Abstract",
+        "PaperURL",
         "SessionCode",
         "SessionTitle",
         "Day",
@@ -748,20 +820,24 @@ def export_public_excel(state: ProgrammeState, output_path: Path = PUBLIC_XLSX_F
     ws_papers.set_column(0, 1, 18)
     ws_papers.set_column(2, 2, 52)
     ws_papers.set_column(3, 3, 80)
-    ws_papers.set_column(4, 5, 20)
-    ws_papers.set_column(6, 10, 18)
+    ws_papers.set_column(4, 6, 24)
+    ws_papers.set_column(7, 11, 18)
     for row_idx, paper in enumerate(payload["papers"], start=1):
         ws_papers.write(row_idx, 0, paper["submission_id"], cell_fmt)
-        ws_papers.write(row_idx, 1, paper["authors"], wrap_fmt)
+        ws_papers.write(row_idx, 1, paper.get("display_presenter", paper.get("presenter_display", paper["authors"])), wrap_fmt)
         ws_papers.write(row_idx, 2, paper["title"], wrap_fmt)
         ws_papers.write(row_idx, 3, paper["abstract"], wrap_fmt)
-        ws_papers.write(row_idx, 4, paper["session_code"], cell_fmt)
-        ws_papers.write(row_idx, 5, paper["session_title"], wrap_fmt)
-        ws_papers.write(row_idx, 6, paper["day_label"], cell_fmt)
-        ws_papers.write(row_idx, 7, paper["time"], cell_fmt)
-        ws_papers.write(row_idx, 8, paper["room"], cell_fmt)
-        ws_papers.write(row_idx, 9, paper["primary_theme"], wrap_fmt)
-        ws_papers.write(row_idx, 10, paper["subtheme"], wrap_fmt)
+        if paper.get("paper_url"):
+            ws_papers.write_url(row_idx, 4, paper["paper_url"], cell_fmt, string=paper["paper_url"])
+        else:
+            ws_papers.write(row_idx, 4, "", cell_fmt)
+        ws_papers.write(row_idx, 5, paper["session_code"], cell_fmt)
+        ws_papers.write(row_idx, 6, paper["session_title"], wrap_fmt)
+        ws_papers.write(row_idx, 7, paper["day_label"], cell_fmt)
+        ws_papers.write(row_idx, 8, paper["time"], cell_fmt)
+        ws_papers.write(row_idx, 9, paper.get("display_room", paper["room"]), cell_fmt)
+        ws_papers.write(row_idx, 10, paper["primary_theme"], wrap_fmt)
+        ws_papers.write(row_idx, 11, paper["subtheme"], wrap_fmt)
 
     wb.close()
     return output_path
@@ -771,6 +847,8 @@ def export_publish_excel(
     state: ProgrammeState,
     output_path: Path = PUBLISH_XLSX_FILE,
     publish_display: str = PUBLISH_DISPLAY_FULL,
+    *,
+    show_links: bool = False,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wb = xlsxwriter.Workbook(str(output_path))
@@ -830,9 +908,7 @@ def export_publish_excel(
     day_blocks = group_sessions_by_day_block(state)
     ordered_days = _ordered_day_labels_from_state(state)
 
-    used_sheet_names = {"Cover", "Session Directory", "Paper Index", "Issues"}
-    if publish_display == PUBLISH_DISPLAY_PUBLIC_SAFE:
-        used_sheet_names.add("Title Presenter Index")
+    used_sheet_names = {"Cover"}
     for day_idx, day_name in enumerate(ordered_days, start=1):
         ws_day = wb.add_worksheet(_safe_sheet_name(f"Day {day_idx}", used_sheet_names))
         _write_publish_day_sheet(
@@ -842,202 +918,6 @@ def export_publish_excel(
             fmts,
             publish_display=publish_display,
         )
-
-    ws_sessions = wb.add_worksheet("Session Directory")
-    ordered_sessions, _ = _publish_sessions_by_day(state)
-    max_capacity = max(
-        [
-            max(
-                1,
-                int(getattr(session, "capacity", len(getattr(session, "papers", [])) or 1)),
-                len(_session_presentation_papers(session)),
-            )
-            for session in ordered_sessions
-        ],
-        default=1,
-    )
-    session_headers = [
-        "SessionCode",
-        "Day",
-        "Time",
-        "Block",
-        "Room",
-        "Capacity",
-        "SessionTitle",
-    ]
-    for talk_idx in range(1, max_capacity + 1):
-        session_headers.append(f"Talk{talk_idx}")
-    ws_sessions.write_row(0, 0, session_headers, header_fmt)
-    ws_sessions.freeze_panes(1, 0)
-    ws_sessions.set_column(0, 0, 16)
-    ws_sessions.set_column(1, 4, 18)
-    ws_sessions.set_column(5, 6, 40)
-    for talk_idx in range(max_capacity):
-        col_idx = 7 + talk_idx
-        ws_sessions.set_column(col_idx, col_idx, 52)
-
-    for row_idx, session in enumerate(ordered_sessions, start=1):
-        ws_sessions.set_row(row_idx, 54)
-        ws_sessions.write(row_idx, 0, session.session_code, cell_fmt)
-        ws_sessions.write(row_idx, 1, session.day_label, cell_fmt)
-        ws_sessions.write(row_idx, 2, session.time, cell_fmt)
-        ws_sessions.write(row_idx, 3, session.block_label, wrap_fmt)
-        ws_sessions.write(row_idx, 4, _display_room_value(session.room, publish_display), cell_fmt)
-        ws_sessions.write(row_idx, 5, max(1, int(getattr(session, "capacity", len(session.papers) or 1))), cell_fmt)
-        ws_sessions.write(row_idx, 6, session.session_title, wrap_fmt)
-        presentation_papers = _session_presentation_papers(session)
-        for talk_idx in range(max_capacity):
-            paper = presentation_papers[talk_idx] if talk_idx < len(presentation_papers) else None
-            talk_col = 7 + talk_idx
-            if paper is None:
-                ws_sessions.write(row_idx, talk_col, "[Reserve slot]", reserve_fmt)
-            else:
-                _write_title_presenter_cell(
-                    ws_sessions,
-                    row_idx,
-                    talk_col,
-                    paper,
-                    wrap_fmt,
-                    presenter_text_fmt,
-                    include_moderator=show_moderator_labels,
-                )
-
-    ws_papers = wb.add_worksheet("Paper Index")
-    paper_headers = [
-        "SubmissionID",
-        "Paper",
-        "SessionCode",
-        "SessionTitle",
-        "Day",
-        "Time",
-        "Room",
-    ]
-    ws_papers.write_row(0, 0, paper_headers, header_fmt)
-    ws_papers.freeze_panes(1, 0)
-    ws_papers.set_column(0, 0, 18)
-    ws_papers.set_column(1, 1, 62)
-    ws_papers.set_column(2, 3, 22)
-    ws_papers.set_column(4, 6, 22)
-    ws_papers.set_column(7, 7, 18)
-
-    for row_idx, paper in enumerate(sorted(state.papers, key=lambda p: p.submission_id), start=1):
-        ws_papers.set_row(row_idx, 48)
-        ws_papers.write(row_idx, 0, paper.submission_id, cell_fmt)
-        _write_title_presenter_cell(
-            ws_papers,
-            row_idx,
-            1,
-            paper,
-            wrap_fmt,
-            presenter_text_fmt,
-        )
-        ws_papers.write(row_idx, 2, paper.session_code, cell_fmt)
-        ws_papers.write(row_idx, 3, paper.session_title, wrap_fmt)
-        ws_papers.write(row_idx, 4, paper.day_label, cell_fmt)
-        ws_papers.write(row_idx, 5, paper.time, cell_fmt)
-        ws_papers.write(row_idx, 6, _display_room_value(paper.room, publish_display), cell_fmt)
-
-    if publish_display == PUBLISH_DISPLAY_PUBLIC_SAFE:
-        ws_titles = wb.add_worksheet("Title Presenter Index")
-        ws_titles.freeze_panes(1, 0)
-        ws_titles.set_column(0, 0, 72)
-        ws_titles.set_column(1, 1, 36)
-        ws_titles.write_row(0, 0, ["Presentation Title", "Presenter Name"], header_fmt)
-
-        sorted_papers = sorted(state.papers, key=lambda p: str(getattr(p, "submission_id", "")))
-        for row_idx, paper in enumerate(sorted_papers, start=1):
-            title, presenter = _paper_title_and_presenter(paper, include_moderator=False)
-            ws_titles.write(row_idx, 0, title, wrap_fmt)
-            ws_titles.write(row_idx, 1, presenter, cell_fmt)
-
-    ws_issues = wb.add_worksheet("Issues")
-    ws_issues.freeze_panes(1, 0)
-    ws_issues.set_column(0, 0, 18)
-    ws_issues.set_column(1, 1, 20)
-    ws_issues.set_column(2, 2, 16)
-    ws_issues.set_column(3, 3, 28)
-    ws_issues.set_column(4, 4, 52)
-    ws_issues.set_column(5, 5, 64)
-
-    issue_headers = ["IssueType", "SessionCode", "SubmissionID", "Presenter", "Title", "Details"]
-    ws_issues.write_row(0, 0, issue_headers, header_fmt)
-    issue_row = 1
-
-    v = state.validations
-    summary_rows = [
-        ("Summary", "", "", "", "Accepted papers", str(v.get("accepted_papers", 0))),
-        ("Summary", "", "", "", "Scheduled papers", str(v.get("scheduled_papers", 0))),
-        ("Summary", "", "", "", "Overflow papers", str(v.get("overflow_papers", 0))),
-        ("Summary", "", "", "", "Unassigned papers", str(v.get("unassigned_papers", 0))),
-        ("Summary", "", "", "", "Reserve slots", str(v.get("reserve_slots", 0))),
-    ]
-    for issue_type, session_code, submission_id, presenter, title, details in summary_rows:
-        ws_issues.write(issue_row, 0, issue_type, cell_fmt)
-        ws_issues.write(issue_row, 1, session_code, cell_fmt)
-        ws_issues.write(issue_row, 2, submission_id, cell_fmt)
-        ws_issues.write(issue_row, 3, presenter, cell_fmt)
-        ws_issues.write(issue_row, 4, title, wrap_fmt)
-        ws_issues.write(issue_row, 5, details, wrap_fmt)
-        issue_row += 1
-
-    paper_lookup = {paper.submission_id: paper for paper in state.papers}
-
-    for sid in v.get("unassigned_submission_ids", []):
-        paper = paper_lookup.get(sid)
-        ws_issues.write(issue_row, 0, "Unassigned", cell_fmt)
-        ws_issues.write(issue_row, 1, "", cell_fmt)
-        ws_issues.write(issue_row, 2, sid, cell_fmt)
-        ws_issues.write(issue_row, 3, "" if paper is None else paper.full_name, wrap_fmt)
-        ws_issues.write(issue_row, 4, "" if paper is None else paper.title, wrap_fmt)
-        ws_issues.write(issue_row, 5, "Paper is currently unassigned.", wrap_fmt)
-        issue_row += 1
-
-    for session_code, sid_list in sorted(v.get("overflow_by_session", {}).items()):
-        target_session = next((session for session in state.sessions if session.session_code == session_code), None)
-        capacity_text = str(getattr(target_session, "capacity", 0) or 0) if target_session is not None else "configured"
-        for sid in sid_list:
-            paper = paper_lookup.get(sid)
-            ws_issues.write(issue_row, 0, "Overflow", cell_fmt)
-            ws_issues.write(issue_row, 1, session_code, cell_fmt)
-            ws_issues.write(issue_row, 2, sid, cell_fmt)
-            ws_issues.write(issue_row, 3, "" if paper is None else paper.full_name, wrap_fmt)
-            ws_issues.write(issue_row, 4, "" if paper is None else paper.title, wrap_fmt)
-            ws_issues.write(
-                issue_row,
-                5,
-                f"Session currently exceeds capacity ({capacity_text}); organizer decision required.",
-                wrap_fmt,
-            )
-            issue_row += 1
-
-    for conflict in v.get("slot_conflicts", []):
-        sid = str(conflict.get("SubmissionID", ""))
-        paper = paper_lookup.get(sid)
-        ws_issues.write(issue_row, 0, "SlotCollision", cell_fmt)
-        ws_issues.write(issue_row, 1, str(conflict.get("SessionCode", "")), cell_fmt)
-        ws_issues.write(issue_row, 2, sid, cell_fmt)
-        ws_issues.write(issue_row, 3, "" if paper is None else paper.full_name, wrap_fmt)
-        ws_issues.write(issue_row, 4, "" if paper is None else paper.title, wrap_fmt)
-        ws_issues.write(issue_row, 5, str(conflict.get("Reason", "")), wrap_fmt)
-        issue_row += 1
-
-    for sid in v.get("duplicate_submission_ids", []):
-        ws_issues.write(issue_row, 0, "DuplicateSubmissionID", cell_fmt)
-        ws_issues.write(issue_row, 1, "", cell_fmt)
-        ws_issues.write(issue_row, 2, sid, cell_fmt)
-        ws_issues.write(issue_row, 3, "", wrap_fmt)
-        ws_issues.write(issue_row, 4, "", wrap_fmt)
-        ws_issues.write(issue_row, 5, "Submission appears more than once in planning state.", wrap_fmt)
-        issue_row += 1
-
-    for sid in v.get("missing_submission_ids", []):
-        ws_issues.write(issue_row, 0, "MissingFromPlanning", cell_fmt)
-        ws_issues.write(issue_row, 1, "", cell_fmt)
-        ws_issues.write(issue_row, 2, sid, cell_fmt)
-        ws_issues.write(issue_row, 3, "", wrap_fmt)
-        ws_issues.write(issue_row, 4, "", wrap_fmt)
-        ws_issues.write(issue_row, 5, "Submission is not accounted for in scheduled/overflow/unassigned state.", wrap_fmt)
-        issue_row += 1
 
     wb.close()
     return output_path
