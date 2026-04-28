@@ -46,7 +46,7 @@ def assemble_public_bundle(
     show_moderators: bool | None = None,
     show_links: bool = True,
 ) -> Path:
-    output_dir = Path(output_dir).resolve()
+    output_dir = Path(output_dir)
     bundle_www_dir = output_dir / "www"
     bundle_assets_dir = bundle_www_dir / "assets"
     bundle_data_dir = bundle_www_dir / "data"
@@ -60,6 +60,7 @@ def assemble_public_bundle(
     shutil.copy2(PUBLIC_WWW_SOURCE_DIR / "index.html", bundle_www_dir / "index.html")
     shutil.copy2(PUBLIC_WWW_SOURCE_DIR / "assets" / "styles.css", bundle_assets_dir / "styles.css")
     shutil.copy2(PUBLIC_WWW_SOURCE_DIR / "assets" / "app.js", bundle_assets_dir / "app.js")
+    shutil.copytree(PUBLIC_WWW_SOURCE_DIR / "assets" / "logos", bundle_assets_dir / "logos", dirs_exist_ok=True)
 
     export_public_payload(
         state,

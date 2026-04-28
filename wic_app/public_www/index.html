@@ -3,26 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>World Inequality Conference 2026: Parallel Sessions</title>
+  <title>World Inequality Conference 2026: Parallel Sessions Programme</title>
   <link rel="stylesheet" href="assets/styles.css">
 </head>
 <body>
   <main id="app">
     <header class="site-header">
-      <div class="header-copy">
-        <p class="eyebrow">Parallel Sessions Programme</p>
-        <h1 id="site-title">World Inequality Conference 2026: Parallel Sessions</h1>
-        <p id="site-subtitle" class="site-subtitle">This programme covers parallel paper sessions only. For plenary sessions, see the official conference programme.</p>
+      <div class="brand-row">
+        <div class="conference-logo-card">
+          <img src="assets/logos/WIC-logo.png" alt="World Inequality Conference, Paris School of Economics, 04-06 June 2026">
+        </div>
+        <div class="header-copy">
+          <p class="eyebrow">Public Programme</p>
+          <h1 id="site-title">Parallel Sessions Programme</h1>
+          <p id="site-subtitle" class="site-subtitle"></p>
+        </div>
       </div>
       <nav class="site-nav" aria-label="Primary">
         <button type="button" class="nav-link is-active" data-view="programme">Programme</button>
+        <a class="nav-link" href="https://inequalitylab.world/www-site/uploads/2026/04/2026-WIC-Programme.pdf" target="_blank" rel="noreferrer noopener">Plenary Sessions</a>
         <button type="button" class="nav-link" data-view="papers">Papers</button>
-        <a id="download-link" class="download-link" href="programme.xlsx">Download Excel</a>
       </nav>
     </header>
 
-    <section class="toolbar">
-      <div id="day-switcher" class="day-switcher" aria-label="Conference days"></div>
+    <section id="programme-toolbar" class="toolbar">
+      <div class="programme-tools">
+        <div id="day-switcher" class="day-switcher" aria-label="Conference days"></div>
+        <a id="download-link" class="download-link" href="programme.xlsx">Download Excel</a>
+      </div>
       <p id="generated-at" class="generated-at"></p>
     </section>
 
@@ -35,6 +43,13 @@
       </div>
       <div id="papers-results" class="papers-results"></div>
     </section>
+
+    <footer class="site-footer" aria-label="Conference partners">
+      <p class="partner-label">Funding partners and institutional support</p>
+      <div class="partner-logo-card">
+        <img src="assets/logos/Logos-partners-768x414.png" alt="Funding partners and institutional support logos">
+      </div>
+    </footer>
   </main>
 
   <template id="session-detail-template">

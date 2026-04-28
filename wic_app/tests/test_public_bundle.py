@@ -34,6 +34,8 @@ class PublicBundleTests(unittest.TestCase):
             self.assertTrue((bundle_path / "www" / "index.html").exists())
             self.assertTrue((bundle_path / "www" / "assets" / "styles.css").exists())
             self.assertTrue((bundle_path / "www" / "assets" / "app.js").exists())
+            self.assertTrue((bundle_path / "www" / "assets" / "logos" / "WIC-logo.png").exists())
+            self.assertTrue((bundle_path / "www" / "assets" / "logos" / "Logos-partners-768x414.png").exists())
             self.assertTrue((bundle_path / "www" / "data" / "programme.json").exists())
             self.assertTrue((bundle_path / "www" / "programme.xlsx").exists())
             self.assertTrue((bundle_path / "README.md").exists())

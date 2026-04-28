@@ -93,9 +93,9 @@ function sortBySessionPosition(a, b) {
 
 function setTitle(conference) {
   const title = conference?.title || 'World Inequality Conference 2026';
-  const pageTitle = `${title}: Parallel Sessions`;
-  byId('site-title').textContent = pageTitle;
-  byId('site-subtitle').textContent = 'This programme covers parallel paper sessions only. For plenary sessions, see the official conference programme.';
+  const pageTitle = `${title}: Parallel Sessions Programme`;
+  byId('site-title').textContent = 'Parallel Sessions Programme';
+  byId('site-subtitle').textContent = '';
   document.title = pageTitle;
   byId('generated-at').textContent = conference?.generated_at ? `Updated: ${conference.generated_at}` : '';
 }
@@ -111,11 +111,13 @@ function uniqueDays(payload) {
 
 function setView(view) {
   state.view = view;
-  document.querySelectorAll('.nav-link').forEach((button) => {
+  document.querySelectorAll('.nav-link[data-view]').forEach((button) => {
     button.classList.toggle('is-active', button.dataset.view === view);
   });
-  byId('programme-view').hidden = view !== 'programme';
-  byId('papers-view').hidden = view !== 'papers';
+  document.querySelectorAll('.view').forEach((section) => {
+    section.hidden = section.id !== `${view}-view`;
+  });
+  byId('programme-toolbar').hidden = view !== 'programme';
 }
 
 function allSessions() {
@@ -258,15 +260,13 @@ function renderSession(session) {
   const expanded = state.expandedSessionId === session.session_id;
   const talks = session.talks || [];
   const visibleRoom = resolveRoomLabel(session);
-  const theme = cleanText(session.primary_theme);
-  const metaParts = [theme, `${talks.length} talk${talks.length === 1 ? '' : 's'}`].filter(Boolean);
 
   card.dataset.sessionId = cleanText(session.session_id);
   card.classList.toggle('is-expanded', expanded);
   room.textContent = visibleRoom;
   room.hidden = !visibleRoom;
   title.textContent = cleanText(session.session_title) || '[Untitled session]';
-  meta.textContent = metaParts.join(' · ') || cleanText(session.block_label);
+  meta.textContent = `${talks.length} talk${talks.length === 1 ? '' : 's'}`;
   summary.setAttribute('aria-expanded', String(expanded));
   summary.addEventListener('click', () => toggleSession(session.session_id));
 
@@ -407,8 +407,7 @@ function renderSessionPanel(panel = byId('session-panel')) {
 
   const talks = session.talks || [];
   const visibleRoom = resolveRoomLabel(session);
-  const theme = cleanText(session.primary_theme);
-  const metaParts = [cleanText(session.day_label), cleanText(session.time), visibleRoom, theme].filter(Boolean);
+  const metaParts = [cleanText(session.day_label), cleanText(session.time), visibleRoom].filter(Boolean);
   const header = document.createElement('header');
   const closeButton = document.createElement('button');
   const talkList = document.createElement('div');
@@ -589,7 +588,7 @@ function renderPapers() {
 }
 
 function wireControls() {
-  document.querySelectorAll('.nav-link').forEach((button) => {
+  document.querySelectorAll('.nav-link[data-view]').forEach((button) => {
     button.addEventListener('click', () => {
       setView(button.dataset.view);
     });
