@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from exporters.publish import PUBLISH_DISPLAY_FULL, export_public_payload, export_publish_excel
+from exporters.publish import PUBLISH_DISPLAY_FULL, export_public_payload, export_publish_excel, export_publish_pdf
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -32,6 +32,7 @@ Files:
 - `www/assets/`: static CSS and JavaScript
 - `www/data/programme.json`: public programme dataset
 - `www/programme.xlsx`: publish workbook download
+- `www/programme.pdf`: publish PDF download
 
 This bundle is intended to be copied into a separate public repository or uploaded directly to a static server.
 """
@@ -75,6 +76,11 @@ def assemble_public_bundle(
         bundle_www_dir / "programme.xlsx",
         publish_display=publish_display,
         show_links=show_links,
+    )
+    export_publish_pdf(
+        state,
+        bundle_www_dir / "programme.pdf",
+        publish_display=publish_display,
     )
 
     (output_dir / "README.md").write_text(_bundle_readme_text(), encoding="utf-8")

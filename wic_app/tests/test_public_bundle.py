@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 if str(APP_ROOT) not in sys.path:
@@ -16,6 +17,17 @@ from reclassification_engine import build_programme_state
 
 
 class PublicBundleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        def _write_fake_pdf(_state, output_path: Path, **_kwargs) -> Path:
+            output_path = Path(output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"%PDF-FAKE")
+            return output_path
+
+        self._pdf_export_patch = patch("bundle_public_app.export_publish_pdf", side_effect=_write_fake_pdf)
+        self.pdf_export_mock = self._pdf_export_patch.start()
+        self.addCleanup(self._pdf_export_patch.stop)
+
     def _zip_text(self, archive_path: Path, suffixes: tuple[str, ...]) -> str:
         with zipfile.ZipFile(archive_path) as archive:
             return "\n".join(
@@ -38,6 +50,7 @@ class PublicBundleTests(unittest.TestCase):
             self.assertTrue((bundle_path / "www" / "assets" / "logos" / "Logos-partners-768x414.png").exists())
             self.assertTrue((bundle_path / "www" / "data" / "programme.json").exists())
             self.assertTrue((bundle_path / "www" / "programme.xlsx").exists())
+            self.assertTrue((bundle_path / "www" / "programme.pdf").exists())
             self.assertTrue((bundle_path / "README.md").exists())
             self.assertFalse((bundle_path / "wic_app" / "public_app.py").exists())
             self.assertFalse((bundle_path / "wic_app" / "public_data.py").exists())
@@ -55,6 +68,7 @@ class PublicBundleTests(unittest.TestCase):
 
         self.assertIn("www/", readme_text)
         self.assertIn("static", readme_text.lower())
+        self.assertIn("programme.pdf", readme_text)
         self.assertNotIn("streamlit run", readme_text)
 
     def test_public_bundle_threads_public_visibility_settings_into_payload(self) -> None:
@@ -88,6 +102,11 @@ class PublicBundleTests(unittest.TestCase):
         self.assertNotIn("Title Presenter Index", workbook_xml)
         self.assertIn("Track 1", visible_text_xml)
         self.assertNotIn("PaperURL", visible_text_xml)
+        self.pdf_export_mock.assert_any_call(
+            state,
+            bundle_path / "www" / "programme.pdf",
+            publish_display="public_safe",
+        )
 
     def test_public_bundle_download_workbook_uses_publish_workbook_and_can_show_links(self) -> None:
         state = build_programme_state()
