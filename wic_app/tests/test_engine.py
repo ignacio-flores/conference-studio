@@ -392,6 +392,24 @@ class EngineTests(unittest.TestCase):
         self.assertNotIn(" (Moderator)", workbook_xml)
         self.assertNotIn(">R1<", workbook_xml)
 
+    def test_public_workbook_omits_removed_blank_paper_url_but_keeps_other_links(self) -> None:
+        state = self._simple_publish_state()
+        state.papers[0].link_to_pdf = ""
+        with tempfile.TemporaryDirectory() as tmp:
+            public_xlsx_path = export_public_excel(
+                state,
+                Path(tmp) / "public_blank_link.xlsx",
+                show_links=True,
+            )
+
+            workbook_xml = self._zip_text(public_xlsx_path, (".xml", ".rels"))
+            visible_text_xml = self._zip_text(public_xlsx_path, ("sharedStrings.xml",))
+
+        self.assertIn("Public settings: rooms=shown, moderators=shown, links=shown", visible_text_xml)
+        self.assertIn("PaperURL", visible_text_xml)
+        self.assertNotIn("https://example.org/p1.pdf", workbook_xml)
+        self.assertIn("https://example.org/p2.pdf", workbook_xml)
+
     def test_publish_workbook_treats_overflow_papers_as_session_presentations_and_adds_disclaimer(self) -> None:
         state = self._simple_publish_state()
         overflow_paper = SimpleNamespace(
@@ -1124,7 +1142,7 @@ class EngineTests(unittest.TestCase):
             reset = next(s for s in state_reset.sessions if s.session_code == session.session_code)
             self.assertNotEqual(reset.session_title, custom_title)
 
-    def test_paper_metadata_overrides_apply_to_title_author_and_moderator(self) -> None:
+    def test_paper_metadata_overrides_apply_to_title_author_link_and_moderator(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             paths = self._temp_state_paths(tmp_path)
@@ -1145,6 +1163,7 @@ class EngineTests(unittest.TestCase):
             sid = paper.submission_id
             new_title = f"{paper.title} (Edited)"
             new_author = f"{paper.full_name} (Edited)"
+            new_link = "https://example.org/edited-paper.pdf"
 
             write_paper_metadata_overrides(
                 [
@@ -1152,6 +1171,8 @@ class EngineTests(unittest.TestCase):
                         "SubmissionID": sid,
                         "TitleOverride": new_title,
                         "AuthorOverride": new_author,
+                        "LinkToPDFOverride": new_link,
+                        "LinkToPDFOverrideActive": "True",
                         "IsModerator": "True",
                     }
                 ],
@@ -1160,12 +1181,15 @@ class EngineTests(unittest.TestCase):
             loaded = load_paper_metadata_overrides(paths["metadata"])
             self.assertEqual(loaded[sid]["TitleOverride"], new_title)
             self.assertEqual(loaded[sid]["AuthorOverride"], new_author)
+            self.assertEqual(loaded[sid]["LinkToPDFOverride"], new_link)
+            self.assertEqual(loaded[sid]["LinkToPDFOverrideActive"], "True")
             self.assertEqual(loaded[sid]["IsModerator"], "True")
 
             state_after = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
             updated = next(p for p in state_after.papers if p.submission_id == sid)
             self.assertEqual(updated.title, new_title)
             self.assertEqual(updated.full_name, new_author)
+            self.assertEqual(updated.link_to_pdf, new_link)
             self.assertTrue(bool(getattr(updated, "is_moderator", False)))
 
     def test_paper_metadata_overrides_support_legacy_rows_without_moderator_column(self) -> None:
@@ -1201,7 +1225,48 @@ class EngineTests(unittest.TestCase):
             updated = next(p for p in state_after.papers if p.submission_id == sid)
             self.assertEqual(updated.title, legacy_title)
             self.assertEqual(updated.full_name, legacy_author)
+            self.assertEqual(load_paper_metadata_overrides(paths["metadata"])[sid]["LinkToPDFOverrideActive"], "")
             self.assertFalse(bool(getattr(updated, "is_moderator", False)))
+
+    def test_paper_metadata_blank_active_link_override_removes_source_link(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths = self._temp_state_paths(tmp_path)
+            for src, key in [
+                (CLASSIFICATION_OVERRIDES_FILE, "classification"),
+                (SESSION_NAME_OVERRIDES_FILE, "session_names"),
+                (PROGRAMME_LAYOUT_OVERRIDES_FILE, "layout"),
+                (SESSION_STRUCTURE_FILE, "structure"),
+                (PAPER_PLACEMENTS_FILE, "placements"),
+                (PAPER_METADATA_OVERRIDES_FILE, "metadata"),
+                (MANUAL_TALKS_FILE, "manual"),
+            ]:
+                if src.exists():
+                    shutil.copy2(src, paths[key])
+
+            state = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            paper = next(p for p in state.papers if str(getattr(p, "link_to_pdf", "")).strip())
+            sid = paper.submission_id
+
+            write_paper_metadata_overrides(
+                [
+                    {
+                        "SubmissionID": sid,
+                        "LinkToPDFOverride": "",
+                        "LinkToPDFOverrideActive": "True",
+                    }
+                ],
+                paths["metadata"],
+            )
+            loaded = load_paper_metadata_overrides(paths["metadata"])
+            self.assertIn(sid, loaded)
+            self.assertEqual(loaded[sid]["LinkToPDFOverride"], "")
+            self.assertEqual(loaded[sid]["LinkToPDFOverrideActive"], "True")
+            self.assertIn("LinkToPDFOverrideActive", paths["metadata"].read_text(encoding="utf-8"))
+
+            state_after = self._build_state(paths, submissions=SUBMISSIONS_FILE, programme=PROGRAMME_FILE)
+            updated = next(p for p in state_after.papers if p.submission_id == sid)
+            self.assertEqual(updated.link_to_pdf, "")
 
     def test_paper_archive_overrides_roundtrip_and_exclusion_from_active_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

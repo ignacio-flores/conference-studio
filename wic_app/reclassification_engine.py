@@ -399,6 +399,8 @@ PAPER_METADATA_HEADERS = [
     "SubmissionID",
     "TitleOverride",
     "AuthorOverride",
+    "LinkToPDFOverride",
+    "LinkToPDFOverrideActive",
     "IsModerator",
     "UpdatedAt",
 ]
@@ -570,6 +572,7 @@ def _compute_edited_submission_ids(
         if (
             str(row.get("TitleOverride", "")).strip()
             or str(row.get("AuthorOverride", "")).strip()
+            or parse_bool(str(row.get("LinkToPDFOverrideActive", "")))
             or parse_bool(str(row.get("IsModerator", "")))
         ):
             edited.add(sid)
@@ -1135,10 +1138,14 @@ def load_paper_metadata_overrides(path: Path = PAPER_METADATA_OVERRIDES_FILE) ->
         sid = row.get("SubmissionID", "")
         if not sid:
             continue
+        link_override = str(row.get("LinkToPDFOverride", "")).strip()
+        link_override_active = parse_bool(str(row.get("LinkToPDFOverrideActive", ""))) or bool(link_override)
         out[sid] = {
             "SubmissionID": sid,
             "TitleOverride": str(row.get("TitleOverride", "")).strip(),
             "AuthorOverride": str(row.get("AuthorOverride", "")).strip(),
+            "LinkToPDFOverride": link_override,
+            "LinkToPDFOverrideActive": "True" if link_override_active else "",
             "IsModerator": "True" if parse_bool(str(row.get("IsModerator", ""))) else "",
             "UpdatedAt": str(row.get("UpdatedAt", "")).strip(),
         }
@@ -1157,13 +1164,17 @@ def write_paper_metadata_overrides(
             continue
         title_override = str(row.get("TitleOverride", "")).strip()
         author_override = str(row.get("AuthorOverride", "")).strip()
+        link_override = str(row.get("LinkToPDFOverride", "")).strip()
+        link_override_active = parse_bool(str(row.get("LinkToPDFOverrideActive", ""))) or bool(link_override)
         is_moderator = parse_bool(str(row.get("IsModerator", "")))
-        if not title_override and not author_override and not is_moderator:
+        if not title_override and not author_override and not link_override_active and not is_moderator:
             continue
         normalized[sid] = {
             "SubmissionID": sid,
             "TitleOverride": title_override,
             "AuthorOverride": author_override,
+            "LinkToPDFOverride": link_override,
+            "LinkToPDFOverrideActive": "True" if link_override_active else "",
             "IsModerator": "True" if is_moderator else "",
             "UpdatedAt": str(row.get("UpdatedAt", "")).strip() or now,
         }
@@ -1520,11 +1531,15 @@ def _apply_paper_metadata_overrides(
             continue
         title_override = str(row.get("TitleOverride", "")).strip()
         author_override = str(row.get("AuthorOverride", "")).strip()
+        link_override = str(row.get("LinkToPDFOverride", "")).strip()
+        link_override_active = parse_bool(str(row.get("LinkToPDFOverrideActive", "")))
         is_moderator = parse_bool(str(row.get("IsModerator", "")))
         if title_override:
             paper.title = title_override
         if author_override:
             paper.full_name = author_override
+        if link_override_active:
+            paper.link_to_pdf = link_override
         paper.is_moderator = is_moderator
 
 

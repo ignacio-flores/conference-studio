@@ -249,6 +249,50 @@ class PublicDataTests(unittest.TestCase):
         self.assertEqual(talk["paper_url"], "https://private.example/P9.pdf")
         self.assertNotIn("link_to_pdf", talk)
 
+    def test_build_public_payload_omits_blank_removed_paper_url_when_links_are_shown(self) -> None:
+        conference = load_conference_config()
+        paper = _paper(
+            "P10",
+            session_id="S10",
+            session_code="D1-B1-R10",
+            session_title="Session S10",
+            day_label="Day 1",
+            day_num=1,
+            time="10h00-11h00",
+            block_label="SESSION 1",
+            block_num=1,
+            room="R10",
+        )
+        paper.link_to_pdf = ""
+        session = _session(
+            "S10",
+            status="active",
+            paper=paper,
+            day_label="Day 1",
+            day_num=1,
+            time="10h00-11h00",
+            block_label="SESSION 1",
+            block_num=1,
+            room="R10",
+        )
+        state = SimpleNamespace(
+            papers=[paper],
+            sessions=[session],
+            inactive_sessions=[],
+            archived_papers=[],
+            validations={},
+            unassigned_papers=[],
+            slot_conflicts=[],
+            edited_submission_ids=set(),
+        )
+
+        payload = build_public_payload(state, conference, show_links=True)
+
+        self.assertTrue(payload["public_settings"]["show_links"])
+        self.assertEqual(payload["papers"][0]["paper_url"], "")
+        self.assertEqual(payload["sessions"][0]["talks"][0]["paper_url"], "")
+        self.assertNotIn("link_to_pdf", payload["papers"][0])
+
     def test_build_public_payload_includes_overflow_papers_as_regular_public_talks(self) -> None:
         conference = load_conference_config()
         scheduled = _paper(

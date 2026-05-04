@@ -8,6 +8,7 @@ import os
 import re
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional
+from urllib.parse import urlparse
 
 from runtime_compat import install_hashlib_usedforsecurity_compat
 
@@ -174,6 +175,14 @@ inject_sticky_inspector_css()
 
 def _normalize_text(value: object) -> str:
     return str(value or "").strip()
+
+
+def _is_valid_paper_url(value: object) -> bool:
+    url = _normalize_text(value)
+    if not url:
+        return True
+    parsed = urlparse(url)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 def _classification_override_value(value: object) -> str:
@@ -643,10 +652,21 @@ def _apply_paper_metadata_edits_if_changed(edited_df: pd.DataFrame) -> bool:
         paper.submission_id: {
             "title": _normalize_text(paper.title),
             "author": _normalize_text(paper.full_name),
+            "link_to_pdf": _normalize_text(getattr(paper, "link_to_pdf", "")),
             "is_moderator": bool(getattr(paper, "is_moderator", False)),
         }
         for paper in state.papers
     }
+    has_title_column = "Title" in edited_df.columns
+    has_author_column = "FullName" in edited_df.columns
+    has_link_column = "LinkToPDF" in edited_df.columns
+    if has_link_column:
+        for _, row in edited_df.iterrows():
+            sid = _normalize_text(row.get("SubmissionID", ""))
+            if sid and not _is_valid_paper_url(row.get("LinkToPDF", "")):
+                st.error("PDF URL must be blank or a valid http(s) URL.")
+                return False
+
     existing_overrides = load_paper_metadata_overrides(PAPER_METADATA_OVERRIDES_FILE)
     merged = dict(existing_overrides)
     now = datetime.utcnow().isoformat(timespec="seconds")
@@ -658,18 +678,32 @@ def _apply_paper_metadata_edits_if_changed(edited_df: pd.DataFrame) -> bool:
         if not sid or sid not in current_map:
             continue
 
-        new_title = _normalize_text(row.get("Title", ""))
-        new_author = _normalize_text(row.get("FullName", ""))
+        current = current_map[sid]
+        existing = dict(merged.get(sid, {}))
+        existing_title_override = _normalize_text(existing.get("TitleOverride", ""))
+        existing_author_override = _normalize_text(existing.get("AuthorOverride", ""))
+
+        new_title = _normalize_text(row.get("Title", "")) if has_title_column else current["title"]
+        new_author = _normalize_text(row.get("FullName", "")) if has_author_column else current["author"]
+        new_link = _normalize_text(row.get("LinkToPDF", "")) if has_link_column else current["link_to_pdf"]
         if "IsModerator" in edited_df.columns:
             new_is_moderator = parse_bool(str(row.get("IsModerator", "")))
         else:
-            new_is_moderator = current_map[sid]["is_moderator"]
-        current = current_map[sid]
-        if (
-            new_title == current["title"]
-            and new_author == current["author"]
-            and new_is_moderator == current["is_moderator"]
-        ):
+            new_is_moderator = current["is_moderator"]
+
+        title_changed = has_title_column and new_title != current["title"]
+        author_changed = has_author_column and new_author != current["author"]
+        link_changed = has_link_column and new_link != current["link_to_pdf"]
+        moderator_changed = new_is_moderator != current["is_moderator"]
+
+        existing_link_active = parse_bool(str(existing.get("LinkToPDFOverrideActive", "")))
+        link_override = _normalize_text(existing.get("LinkToPDFOverride", "")) if existing_link_active else ""
+        link_override_active = existing_link_active
+        if link_changed:
+            link_override = new_link
+            link_override_active = True
+
+        if not (title_changed or author_changed or link_changed or moderator_changed):
             continue
 
         if snapshot is None:
@@ -677,8 +711,10 @@ def _apply_paper_metadata_edits_if_changed(edited_df: pd.DataFrame) -> bool:
 
         merged[sid] = {
             "SubmissionID": sid,
-            "TitleOverride": new_title,
-            "AuthorOverride": new_author,
+            "TitleOverride": new_title if title_changed else existing_title_override,
+            "AuthorOverride": new_author if author_changed else existing_author_override,
+            "LinkToPDFOverride": link_override,
+            "LinkToPDFOverrideActive": "True" if link_override_active else "",
             "IsModerator": "True" if new_is_moderator else "",
             "UpdatedAt": now,
         }
@@ -819,6 +855,8 @@ def _set_session_moderator(session_id: str, target_submission_id: str) -> bool:
             "SubmissionID": paper_sid,
             "TitleOverride": _normalize_text(existing.get("TitleOverride", "")),
             "AuthorOverride": _normalize_text(existing.get("AuthorOverride", "")),
+            "LinkToPDFOverride": _normalize_text(existing.get("LinkToPDFOverride", "")),
+            "LinkToPDFOverrideActive": "True" if parse_bool(str(existing.get("LinkToPDFOverrideActive", ""))) else "",
             "IsModerator": "True" if paper_sid == sid else "",
             "UpdatedAt": now,
         }
@@ -3366,6 +3404,18 @@ def _on_inspector_paper_fields_change(submission_id: str) -> None:
     _apply_classification_edits_if_changed(edited_df)
 
 
+def _on_inspector_paper_url_change(submission_id: str) -> None:
+    sid = _normalize_text(submission_id)
+    if not sid:
+        return
+    link_to_pdf = _normalize_text(st.session_state.get(f"ins_pdf_url_{sid}", ""))
+    if not _is_valid_paper_url(link_to_pdf):
+        st.error("PDF URL must be blank or a valid http(s) URL.")
+        return
+    edited_df = pd.DataFrame([{"SubmissionID": sid, "LinkToPDF": link_to_pdf}])
+    _apply_paper_metadata_edits_if_changed(edited_df)
+
+
 def _render_archive_controls(paper: object, scope_prefix: str) -> bool:
     sid = _normalize_text(getattr(paper, "submission_id", ""))
     if not sid:
@@ -3413,7 +3463,7 @@ def _render_paper_slot_inspector(
         st.caption(f"Paper - Slot {talk_index} - Session {session.session_code}")
     title = _clean_display_text(paper.title) or "[No paper title]"
     pdf_url = _normalize_text(paper.link_to_pdf)
-    if pdf_url.startswith("http"):
+    if pdf_url and _is_valid_paper_url(pdf_url):
         st.markdown(
             f"#### <a href='{html.escape(pdf_url)}' target='_blank' rel='noopener noreferrer'>{html.escape(title)}</a>",
             unsafe_allow_html=True,
@@ -3451,6 +3501,12 @@ def _render_paper_slot_inspector(
         st.session_state[notes_key] = paper.override_notes
         st.session_state[notes_src] = paper.override_notes
 
+    pdf_url_key = f"ins_pdf_url_{paper.submission_id}"
+    pdf_url_src = f"{pdf_url_key}_src"
+    if st.session_state.get(pdf_url_src) != pdf_url:
+        st.session_state[pdf_url_key] = pdf_url
+        st.session_state[pdf_url_src] = pdf_url
+
     st.selectbox(
         "PrimaryTheme",
         theme_options,
@@ -3463,6 +3519,13 @@ def _render_paper_slot_inspector(
         key=subtheme_key,
         on_change=_on_inspector_paper_fields_change,
         args=(paper.submission_id,),
+    )
+    st.text_input(
+        "PDF URL",
+        key=pdf_url_key,
+        on_change=_on_inspector_paper_url_change,
+        args=(paper.submission_id,),
+        help="Leave blank to remove the paper link.",
     )
     if all_sessions:
         session_ids = [s.session_id for s in all_sessions]

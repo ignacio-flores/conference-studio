@@ -10,14 +10,19 @@ if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 
 from ui.papers import (  # noqa: E402
+    KEEP_CURRENT_SESSION_OPTION,
     build_classification_update_df,
     build_paper_metadata_update_df,
+    build_session_edit_options,
     format_paper_placement_label,
     build_session_options,
     default_session_option_for_paper,
     format_target_session_label,
+    is_valid_paper_url,
     paper_public_row,
     presenter_with_abstract_html,
+    resolve_session_edit_selection,
+    should_apply_session_edit,
     title_link_html,
 )
 
@@ -40,6 +45,13 @@ class PapersViewTests(unittest.TestCase):
         no_link = title_link_html("No Link Paper", "")
         self.assertIn("No Link Paper", no_link)
         self.assertNotIn("href=", no_link)
+
+    def test_paper_url_validation_accepts_blank_and_http_urls_only(self) -> None:
+        self.assertTrue(is_valid_paper_url(""))
+        self.assertTrue(is_valid_paper_url("https://example.org/paper.pdf"))
+        self.assertTrue(is_valid_paper_url("http://example.org/paper.pdf"))
+        self.assertFalse(is_valid_paper_url("ftp://example.org/paper.pdf"))
+        self.assertFalse(is_valid_paper_url("https:///paper.pdf"))
 
     def test_paper_public_row_hides_submission_id(self) -> None:
         raw = {
@@ -79,12 +91,14 @@ class PapersViewTests(unittest.TestCase):
             submission_id="XYZ",
             title="Adjusted Title",
             full_name="Adjusted Author",
+            link_to_pdf="https://example.org/adjusted.pdf",
         )
-        self.assertEqual(list(edited.columns), ["SubmissionID", "Title", "FullName"])
+        self.assertEqual(list(edited.columns), ["SubmissionID", "Title", "FullName", "LinkToPDF"])
         self.assertEqual(len(edited), 1)
         self.assertEqual(str(edited.iloc[0]["SubmissionID"]), "XYZ")
         self.assertEqual(str(edited.iloc[0]["Title"]), "Adjusted Title")
         self.assertEqual(str(edited.iloc[0]["FullName"]), "Adjusted Author")
+        self.assertEqual(str(edited.iloc[0]["LinkToPDF"]), "https://example.org/adjusted.pdf")
 
     def test_table_details_button_key_is_used(self) -> None:
         text = (APP_ROOT / "ui" / "papers.py").read_text(encoding="utf-8")
@@ -97,10 +111,15 @@ class PapersViewTests(unittest.TestCase):
         self.assertIn('"Hide more details"', text)
         self.assertIn('st.caption("Abstract")', text)
         self.assertIn('key=f"paper_row_details_{sid}"', text)
-        self.assertIn('"Target Session"', text)
+        self.assertIn('"Change Session"', text)
+        self.assertIn("KEEP_CURRENT_SESSION_OPTION", text)
+        self.assertIn("should_apply_session_edit(new_session_target)", text)
         self.assertIn("apply_paper_session_selection_edit", text)
         self.assertIn("apply_archive_paper", text)
         self.assertIn("archive_reason_options", text)
+        self.assertIn('key=f"paper_edit_pdf_url_{sid}"', text)
+        self.assertIn('"PDF URL"', text)
+        self.assertIn("is_valid_paper_url(new_link_to_pdf)", text)
         self.assertIn('"Archive reason"', text)
         self.assertIn('"Archive Paper"', text)
         self.assertIn("mobile_mode: bool = False", text)
@@ -110,6 +129,54 @@ class PapersViewTests(unittest.TestCase):
         self.assertNotIn("paper_row_open_presenter_", text)
         self.assertNotIn("paper_row_open_theme_", text)
         self.assertNotIn("paper_row_open_place_", text)
+
+    def test_paper_list_session_edit_options_default_to_keep_current(self) -> None:
+        session_option = ("session", "A1")
+        options, labels = build_session_edit_options(
+            "Session Alpha | R1 | Day 1 | 09h00-10h00 | Slots 1/3",
+            [("unassigned", ""), session_option],
+            {
+                ("unassigned", ""): "Unassigned",
+                session_option: "Session Alpha | R1 | Day 1 | 09h00-10h00 | Slots 1/3",
+            },
+        )
+        self.assertEqual(options[0], KEEP_CURRENT_SESSION_OPTION)
+        self.assertEqual(options[1:], [("unassigned", ""), session_option])
+        self.assertEqual(
+            labels[KEEP_CURRENT_SESSION_OPTION],
+            "Keep current session: Session Alpha | R1 | Day 1 | 09h00-10h00 | Slots 1/3",
+        )
+
+    def test_paper_list_session_edit_selection_resets_stale_state_to_keep_current(self) -> None:
+        session_option = ("session", "A1")
+        options = [KEEP_CURRENT_SESSION_OPTION, ("unassigned", ""), session_option]
+        current_signature = ("P1", session_option, "Session Alpha")
+
+        self.assertEqual(
+            resolve_session_edit_selection(("unassigned", ""), ("P1", ("unassigned", ""), "old"), current_signature, options),
+            KEEP_CURRENT_SESSION_OPTION,
+        )
+        self.assertEqual(
+            resolve_session_edit_selection(("missing", ""), current_signature, current_signature, options),
+            KEEP_CURRENT_SESSION_OPTION,
+        )
+        self.assertEqual(
+            resolve_session_edit_selection(("unassigned", ""), current_signature, current_signature, options),
+            ("unassigned", ""),
+        )
+
+    def test_paper_list_session_edit_only_applies_explicit_moves(self) -> None:
+        self.assertFalse(should_apply_session_edit(KEEP_CURRENT_SESSION_OPTION))
+        self.assertTrue(should_apply_session_edit(("unassigned", "")))
+        self.assertTrue(should_apply_session_edit(("session", "A1")))
+
+    def test_programme_inspector_exposes_pdf_url_editor(self) -> None:
+        text = (APP_ROOT / "app.py").read_text(encoding="utf-8")
+        self.assertIn("def _on_inspector_paper_url_change", text)
+        self.assertIn('f"ins_pdf_url_{paper.submission_id}"', text)
+        self.assertIn('"PDF URL"', text)
+        self.assertIn("_is_valid_paper_url", text)
+        self.assertIn("LinkToPDF", text)
 
     def test_session_options_rank_unassigned_active_inactive(self) -> None:
         state = SimpleNamespace(

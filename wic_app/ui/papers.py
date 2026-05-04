@@ -4,6 +4,7 @@ import html
 from pathlib import Path
 import re
 from typing import Callable, Dict, Iterable, List, Tuple
+from urllib.parse import urlparse
 
 import pandas as pd
 import streamlit as st
@@ -12,6 +13,7 @@ import streamlit.components.v1 as components
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 WHITESPACE_RE = re.compile(r"\s+")
 PAPER_LIST_PAGE_SIZE = 20
+KEEP_CURRENT_SESSION_OPTION: Tuple[str, str] = ("keep_current", "")
 PAPER_LIST_INFINITE_SCROLL_COMPONENT_DIR = (
     Path(__file__).resolve().parent / "components" / "paper_list_infinite_scroll"
 )
@@ -29,6 +31,14 @@ def _clean_text(value: object) -> str:
     text = html.unescape(str(value or ""))
     text = HTML_TAG_RE.sub("", text)
     return WHITESPACE_RE.sub(" ", text).strip()
+
+
+def is_valid_paper_url(value: object) -> bool:
+    url = _normalize_text(value)
+    if not url:
+        return True
+    parsed = urlparse(url)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 def _clip_text(value: object, limit: int) -> str:
@@ -49,7 +59,7 @@ def presenter_with_abstract_html(full_name: str, abstract: str) -> str:
 def title_link_html(title: str, link_to_pdf: str) -> str:
     safe_title = html.escape(_clean_text(title) or "[No title]")
     link = _normalize_text(link_to_pdf)
-    if link.startswith("http"):
+    if link and is_valid_paper_url(link):
         safe_link = html.escape(link, quote=True)
         return (
             f"<a href='{safe_link}' target='_blank' rel='noopener noreferrer' "
@@ -76,7 +86,11 @@ def paper_public_row(raw: Dict[str, object]) -> Dict[str, str]:
         "Day": _normalize_text(raw.get("Day", "")),
         "Block": _normalize_text(raw.get("Block", "")),
         "Room": _normalize_text(raw.get("Room", "")),
-        "HasLink": "yes" if _normalize_text(raw.get("LinkToPDF", "")).startswith("http") else "no",
+        "HasLink": (
+            "yes"
+            if is_valid_paper_url(raw.get("LinkToPDF", "")) and _normalize_text(raw.get("LinkToPDF", ""))
+            else "no"
+        ),
     }
 
 
@@ -102,16 +116,16 @@ def build_paper_metadata_update_df(
     submission_id: str,
     title: str,
     full_name: str,
+    link_to_pdf: str | None = None,
 ) -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {
-                "SubmissionID": _normalize_text(submission_id),
-                "Title": _normalize_text(title),
-                "FullName": _normalize_text(full_name),
-            }
-        ]
-    )
+    row = {
+        "SubmissionID": _normalize_text(submission_id),
+        "Title": _normalize_text(title),
+        "FullName": _normalize_text(full_name),
+    }
+    if link_to_pdf is not None:
+        row["LinkToPDF"] = _normalize_text(link_to_pdf)
+    return pd.DataFrame([row])
 
 
 def _filtered_papers(
@@ -251,6 +265,58 @@ def default_session_option_for_paper(
     return candidate if session_id and candidate in options_set else default
 
 
+def build_session_edit_options(
+    current_placement_label: str,
+    session_options: Iterable[Tuple[str, str]],
+    session_labels: Dict[Tuple[str, str], str],
+) -> tuple[List[Tuple[str, str]], Dict[Tuple[str, str], str]]:
+    current_label = _normalize_text(current_placement_label) or "Unassigned"
+    options = [KEEP_CURRENT_SESSION_OPTION] + list(session_options)
+    labels = dict(session_labels)
+    labels[KEEP_CURRENT_SESSION_OPTION] = f"Keep current session: {current_label}"
+    return options, labels
+
+
+def resolve_session_edit_selection(
+    stored_selection: object,
+    stored_signature: object,
+    current_signature: object,
+    session_edit_options: Iterable[Tuple[str, str]],
+) -> Tuple[str, str]:
+    if stored_signature != current_signature:
+        return KEEP_CURRENT_SESSION_OPTION
+    if not isinstance(stored_selection, tuple) or stored_selection not in set(session_edit_options):
+        return KEEP_CURRENT_SESSION_OPTION
+    return stored_selection
+
+
+def should_apply_session_edit(selection: Tuple[str, str]) -> bool:
+    return selection != KEEP_CURRENT_SESSION_OPTION
+
+
+def _paper_session_edit_keys(sid: str) -> tuple[str, str]:
+    session_key = f"paper_edit_session_target_{sid}"
+    return session_key, f"{session_key}_src"
+
+
+def _reset_paper_session_edit_state(sid: str) -> None:
+    for key in _paper_session_edit_keys(sid):
+        st.session_state.pop(key, None)
+
+
+def _current_placement_label_for_paper(state, submission_id: str) -> str:
+    sid = _normalize_text(submission_id)
+    paper = next(
+        (candidate for candidate in list(getattr(state, "papers", []) or []) if _normalize_text(candidate.submission_id) == sid),
+        None,
+    )
+    sessions_by_id = {
+        _normalize_text(getattr(session, "session_id", "")): session
+        for session in list(getattr(state, "all_sessions", []) or [])
+    }
+    return format_paper_placement_label(paper, sessions_by_id)
+
+
 def _render_paper_list_infinite_scroll(token: str, enabled: bool) -> str:
     value = paper_list_infinite_scroll_component(
         token=_normalize_text(token),
@@ -290,8 +356,10 @@ def _render_paper_details_panel(
         use_container_width=False,
     ):
         if is_editing:
+            _reset_paper_session_edit_state(sid)
             st.session_state[edit_key] = ""
         else:
+            _reset_paper_session_edit_state(sid)
             st.session_state[detail_key] = sid
             st.session_state[edit_key] = sid
         st.rerun()
@@ -311,8 +379,14 @@ def _render_paper_details_panel(
             value=_normalize_text(row.get("Title", "")),
             key=f"paper_edit_title_{sid}",
         )
+        new_link_to_pdf = st.text_input(
+            "PDF URL",
+            value=_normalize_text(row.get("LinkToPDF", "")),
+            key=f"paper_edit_pdf_url_{sid}",
+            help="Leave blank to remove the paper link.",
+        )
     else:
-        e_meta_1, e_meta_2 = st.columns([2, 3], gap="small")
+        e_meta_1, e_meta_2, e_meta_3 = st.columns([2, 3, 2], gap="small")
         new_author = e_meta_1.text_input(
             "Author",
             value=_normalize_text(row.get("FullName", "")),
@@ -323,19 +397,37 @@ def _render_paper_details_panel(
             value=_normalize_text(row.get("Title", "")),
             key=f"paper_edit_title_{sid}",
         )
+        new_link_to_pdf = e_meta_3.text_input(
+            "PDF URL",
+            value=_normalize_text(row.get("LinkToPDF", "")),
+            key=f"paper_edit_pdf_url_{sid}",
+            help="Leave blank to remove the paper link.",
+        )
 
-    session_key = f"paper_edit_session_target_{sid}"
-    session_src = f"{session_key}_src"
     default_session_target = default_session_option_for_paper(state, sid, session_options)
-    if st.session_state.get(session_src) != default_session_target:
-        st.session_state[session_key] = default_session_target
-        st.session_state[session_src] = default_session_target
+    current_placement_label = _current_placement_label_for_paper(state, sid)
+    session_edit_options, session_edit_labels = build_session_edit_options(
+        current_placement_label,
+        session_options,
+        session_labels,
+    )
+    session_key, session_src = _paper_session_edit_keys(sid)
+    session_signature = (sid, default_session_target, current_placement_label)
+    resolved_session_target = resolve_session_edit_selection(
+        st.session_state.get(session_key),
+        st.session_state.get(session_src),
+        session_signature,
+        session_edit_options,
+    )
+    if st.session_state.get(session_key) != resolved_session_target or st.session_state.get(session_src) != session_signature:
+        st.session_state[session_key] = resolved_session_target
+        st.session_state[session_src] = session_signature
     new_session_target = st.selectbox(
-        "Target Session",
-        options=session_options,
+        "Change Session",
+        options=session_edit_options,
         key=session_key,
-        format_func=lambda option: session_labels.get(option, "Unassigned"),
-        help="Unassigned first, then active sessions, then inactive sessions.",
+        format_func=lambda option: session_edit_labels.get(option, "Unassigned"),
+        help="Leave as keep-current unless you want to move this paper.",
     )
 
     st.caption("Classification")
@@ -394,11 +486,15 @@ def _render_paper_details_panel(
     )
     if st.button("Archive Paper", key=f"paper_edit_archive_{sid}", use_container_width=True):
         if apply_archive_paper(sid, archive_reason, archive_note):
+            _reset_paper_session_edit_state(sid)
             st.session_state[edit_key] = ""
             st.session_state[detail_key] = ""
             st.rerun()
     save_col, cancel_col = st.columns(2)
     if save_col.button("Save", key=f"paper_edit_save_{sid}", use_container_width=True):
+        if not is_valid_paper_url(new_link_to_pdf):
+            st.error("PDF URL must be blank or a valid http(s) URL.")
+            return
         classification_row = build_classification_update_df(
             submission_id=sid,
             primary_theme=new_theme,
@@ -409,15 +505,20 @@ def _render_paper_details_panel(
             submission_id=sid,
             title=new_title,
             full_name=new_author,
+            link_to_pdf=new_link_to_pdf,
         )
         class_changed = apply_classification_edits_if_changed(classification_row)
         metadata_changed = apply_paper_metadata_edits_if_changed(metadata_row)
-        session_changed = apply_paper_session_selection_edit(sid, new_session_target)
+        session_changed = False
+        if should_apply_session_edit(new_session_target):
+            session_changed = apply_paper_session_selection_edit(sid, new_session_target)
         if class_changed or metadata_changed or session_changed:
+            _reset_paper_session_edit_state(sid)
             st.session_state[edit_key] = ""
             st.rerun()
         st.info("No paper changes detected.")
     if cancel_col.button("Cancel", key=f"paper_edit_cancel_{sid}", use_container_width=True):
+        _reset_paper_session_edit_state(sid)
         st.session_state[edit_key] = ""
         st.rerun()
 
@@ -511,9 +612,11 @@ def render_paper_list_tab(
     }
     visible_ids = set(filtered["SubmissionID"].astype(str).tolist())
     if detail_sid and detail_sid not in visible_ids:
+        _reset_paper_session_edit_state(detail_sid)
         st.session_state[detail_key] = ""
         detail_sid = ""
     if edit_sid and edit_sid not in visible_ids:
+        _reset_paper_session_edit_state(edit_sid)
         st.session_state[edit_key] = ""
         edit_sid = ""
     if edit_sid and detail_sid != edit_sid:
@@ -572,6 +675,7 @@ def render_paper_list_tab(
                     if is_details_open:
                         st.session_state[detail_key] = ""
                         if is_editing:
+                            _reset_paper_session_edit_state(sid)
                             st.session_state[edit_key] = ""
                     else:
                         st.session_state[detail_key] = sid
@@ -582,6 +686,7 @@ def render_paper_list_tab(
                     key=f"paper_row_edit_{sid}",
                     use_container_width=True,
                 ):
+                    _reset_paper_session_edit_state(sid)
                     st.session_state[detail_key] = sid
                     st.session_state[edit_key] = sid
                     st.rerun()
@@ -602,6 +707,7 @@ def render_paper_list_tab(
             if is_details_open:
                 st.session_state[detail_key] = ""
                 if is_editing:
+                    _reset_paper_session_edit_state(sid)
                     st.session_state[edit_key] = ""
             else:
                 st.session_state[detail_key] = sid
@@ -631,6 +737,7 @@ def render_paper_list_tab(
     if mobile_mode and detail_sid:
         selected_row = rows_by_sid.get(detail_sid)
         if selected_row is None:
+            _reset_paper_session_edit_state(detail_sid)
             st.session_state[detail_key] = ""
             st.session_state[edit_key] = ""
             st.rerun()

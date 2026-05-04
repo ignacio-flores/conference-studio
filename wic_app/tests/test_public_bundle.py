@@ -125,6 +125,35 @@ class PublicBundleTests(unittest.TestCase):
         self.assertNotIn("Issues", workbook_xml)
         self.assertNotIn("PaperURL", visible_text_xml)
 
+    def test_public_bundle_payload_omits_removed_blank_paper_url(self) -> None:
+        state = build_programme_state()
+        target = next(
+            paper
+            for session in state.sessions
+            for paper in (
+                list(getattr(session, "papers", []) or [])
+                + list(getattr(session, "overflow_papers", []) or [])
+            )
+            if paper is not None and str(getattr(paper, "link_to_pdf", "")).strip()
+        )
+        target_id = target.submission_id
+        original_url = target.link_to_pdf
+        target.link_to_pdf = ""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle_path = assemble_public_bundle(
+                state,
+                output_dir=Path(tmp) / "public_bundle",
+                show_links=True,
+            )
+            payload = json.loads((bundle_path / "www" / "data" / "programme.json").read_text(encoding="utf-8"))
+            workbook_xml = self._zip_text(bundle_path / "www" / "programme.xlsx", (".xml", ".rels"))
+
+        record = next(paper for paper in payload["papers"] if paper["submission_id"] == target_id)
+        self.assertEqual(record["paper_url"], "")
+        self.assertNotIn(original_url, json.dumps(payload))
+        self.assertNotIn(original_url, workbook_xml)
+
     def test_public_bundle_default_path_is_repo_local(self) -> None:
         expected = APP_ROOT.parent / "public_bundle"
         self.assertEqual(PUBLIC_BUNDLE_DIR, expected)
