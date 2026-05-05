@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .worktrees/
 .venv/
+.venv.broken.*
 .venv_windows/
 .venv_linux/
 .venv_linux.broken.*

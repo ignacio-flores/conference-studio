@@ -4,7 +4,7 @@
 
 In Finder, double-click:
 
-- `Conference_Studio.command`
+- `Conference_Studio_mac.command`
 
 On Windows, double-click:
 
@@ -16,18 +16,23 @@ On Linux, run:
 
 What it does automatically:
 
-1. Creates `.venv` if needed
+1. Creates the platform virtual environment if needed
 2. Installs dependencies when `wic_app/requirements.txt` changes
 3. Starts the Streamlit app
 
+macOS notes:
+
+- Uses `~/Library/Application Support/Conference Studio/.venv` to avoid syncing machine-specific virtualenv files through Dropbox.
+- If an old repo-local `.venv` is unusable, the launcher moves it aside to `.venv.broken.<timestamp>` and creates a fresh mac environment outside the repo.
+
 Linux notes:
 
-- Uses `.venv_linux` (separate from `.venv`) to avoid cross-OS virtualenv issues.
+- Uses `.venv_linux` (separate from the mac and Windows environments) to avoid cross-OS virtualenv issues.
 - If your distro disables `ensurepip`, the launcher auto-falls back to `--system-site-packages`.
 
 Windows notes:
 
-- Uses `.venv_windows` (separate from `.venv` and `.venv_linux`) to avoid cross-OS virtualenv issues.
+- Uses `.venv_windows` (separate from the mac and Linux environments) to avoid cross-OS virtualenv issues.
 - Prefers `py -3` and falls back to `python` if the Python launcher is unavailable.
 
 ## Folder layout

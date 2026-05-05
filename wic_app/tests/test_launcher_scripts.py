@@ -9,9 +9,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 class LauncherScriptTests(unittest.TestCase):
     def test_macos_launcher_uses_venv_python_directly(self) -> None:
-        text = (REPO_ROOT / "Conference_Studio.command").read_text(encoding="utf-8")
-        self.assertIn('VENV_DIR=".venv"', text)
+        text = (REPO_ROOT / "Conference_Studio_mac.command").read_text(encoding="utf-8")
+        self.assertIn('APP_SUPPORT_DIR="${HOME}/Library/Application Support/Conference Studio"', text)
+        self.assertIn('VENV_DIR="${CONFERENCE_STUDIO_VENV_DIR:-$APP_SUPPORT_DIR/.venv}"', text)
+        self.assertIn('LEGACY_VENV_DIR=".venv"', text)
         self.assertIn('venv_python()', text)
+        self.assertIn('venv_usable_at()', text)
+        self.assertIn('venv_has_pip_at()', text)
+        self.assertIn('venv_has_streamlit_at()', text)
+        self.assertIn('move_broken_venv_aside "$LEGACY_VENV_DIR"', text)
         self.assertIn('"$(venv_python)" -m pip install --upgrade pip', text)
         self.assertIn('"$(venv_python)" -m pip install -r "$REQUIREMENTS_FILE"', text)
         self.assertIn('"$(venv_python)" -m streamlit run "$APP_ENTRYPOINT"', text)
