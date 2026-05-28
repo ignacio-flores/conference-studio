@@ -230,6 +230,183 @@ test_programme_json_loading_and_overflow_order <- function() {
 
   assert(overflow$talk_index == 3L, "zero-index overflow talks should be ordered after numbered talks")
   assert(parsed$programme_source == "json", "--programme-json should switch the source to json")
+  assert(parsed$review_suggested_matches, "suggested-match review should default to TRUE")
+  assert(parsed$match_rules == "slides/slide_match_rules.csv", "default match-rule path should be set")
+
+  parsed_review <- parse_cli_args(c(
+    "--review-suggested-matches=FALSE",
+    "--review-existing-rules=TRUE",
+    "--match-rules=/tmp/rules.csv"
+  ))
+  assert(!parsed_review$review_suggested_matches, "--review-suggested-matches should parse FALSE")
+  assert(parsed_review$review_existing_rules, "--review-existing-rules should parse TRUE")
+  assert(parsed_review$match_rules == "/tmp/rules.csv", "--match-rules should accept a custom path")
+}
+
+fixture_fuzzy_programme <- function() {
+  tibble(
+    submission_id = c("PABLO", "OTHER"),
+    title = c(
+      "Cash Transfers and Tax Compliance Evidence from Argentina",
+      "An Unrelated Programme Paper"
+    ),
+    presenter_display = c("Pablo Perez", "Other Presenter"),
+    room = c("R2-01", "P006"),
+    day_num = c(1L, 1L),
+    day_label = c("Day 1 (4th June)", "Day 1 (4th June)"),
+    block_num = c(1L, 1L),
+    block_label = c("SESSION 1", "SESSION 1"),
+    session_title = c("Public Finance", "Mobility"),
+    time = c("11h30-13h00", "11h30-13h00"),
+    talk_index = c(1L, 2L),
+    title_norm = normalize_title(title)
+  )
+}
+
+fixture_fuzzy_slides <- function(csv_submission_id = "SLIDE-1") {
+  submitted_title <- "Cash Transfer and Tax Compliance Evidence from Argentina"
+  tibble(
+    csv_submission_id = csv_submission_id,
+    slide_submitted_at = as.POSIXct("2026-05-06 09:00:00", tz = "UTC"),
+    submitter_name = "Pablo Perez",
+    slides_csv_email = "pablo@example.com",
+    submitted_title = submitted_title,
+    slide_url = "https://example.invalid/pablo.pdf",
+    title_norm = normalize_title(submitted_title),
+    slide_row = 1L
+  )
+}
+
+fixture_fuzzy_email_lookup <- function() {
+  tibble(
+    submission_id = c("PABLO", "OTHER"),
+    workbook_email = c("pablo@example.com", "other@example.com"),
+    workbook_title = c("Cash Transfers and Tax Compliance", "An Unrelated Programme Paper"),
+    workbook_title_norm = normalize_title(c("Cash Transfers and Tax Compliance", "An Unrelated Programme Paper")),
+    workbook_full_name = c("Pablo Perez", "Other Presenter")
+  )
+}
+
+fixture_rule <- function(decision = "accept", active = TRUE) {
+  slide <- fixture_fuzzy_slides()
+  tibble(
+    programme_submission_id = "PABLO",
+    submitted_title_norm = slide$title_norm,
+    decision = decision,
+    active = active,
+    submitted_title = slide$submitted_title,
+    programme_title = "Cash Transfers and Tax Compliance Evidence from Argentina",
+    submitter_name = "Pablo Perez",
+    programme_presenter = "Pablo Perez",
+    notes = "",
+    updated_at = "2026-05-28T00:00:00Z"
+  )
+}
+
+test_suggested_fuzzy_matches <- function() {
+  warnings <- character()
+  suggestions <- withCallingHandlers(
+    generate_suggested_matches(
+      fixture_fuzzy_programme(),
+      bind_rows(
+        fixture_fuzzy_slides(),
+        fixture_fuzzy_slides("SLIDE-2") %>%
+          mutate(
+            submitted_title = "Cash Transfers Tax Compliance Evidence Argentina",
+            title_norm = normalize_title(submitted_title),
+            slide_row = 2L
+          )
+      ),
+      fixture_fuzzy_email_lookup()
+    ),
+    warning = function(warning) {
+      warnings <<- c(warnings, conditionMessage(warning))
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  pablo_suggestions <- suggestions[suggestions$programme_submission_id == "PABLO", ]
+  assert(!any(str_detect(warnings, "many-to-many")), "candidate-grid generation should not warn about intended many-to-many joins")
+  assert(nrow(pablo_suggestions) >= 1, "same email plus high title similarity should produce a suggestion")
+  assert(all(pablo_suggestions$programme_submission_id == "PABLO"), "suggestion should point to the likely programme row")
+  assert(any(pablo_suggestions$email_match), "suggestion should record exact email evidence")
+  assert(any(pablo_suggestions$name_match), "suggestion should record normalized submitter/presenter evidence")
+  assert(any(pablo_suggestions$title_similarity >= 0.70), "suggestion should include title similarity evidence")
+}
+
+test_match_rules <- function() {
+  temp_dir <- tempfile("slides-rule-output-")
+  programme <- fixture_fuzzy_programme()
+  slides <- fixture_fuzzy_slides()
+  email_lookup <- fixture_fuzzy_email_lookup()
+
+  accepted <- fixture_rule("accept", TRUE)
+  temp_rules <- tempfile(fileext = ".csv")
+  write_match_rules(temp_rules, accepted)
+  reloaded <- read_match_rules(temp_rules)
+  assert(nrow(reloaded) == 1 && reloaded$decision == "accept" && reloaded$active, "rules should round-trip through the CSV file")
+
+  status <- build_slide_status(programme, slides, email_lookup, temp_dir, accepted)
+  pablo <- status[status$submission_id == "PABLO", ]
+  unmatched <- unmatched_slide_submissions(
+    slides,
+    programme,
+    email_lookup,
+    accepted,
+    resolve_slide_matches(programme, slides, email_lookup, accepted)
+  )
+
+  assert(pablo$status == "matched", "active accepted rules should match the slide to the programme row")
+  assert(pablo$match_method == "manual_rule", "accepted rules should be marked as manual_rule")
+  assert(nrow(unmatched) == 0, "accepted rules should remove the slide from unmatched submissions")
+
+  changed_submission <- fixture_fuzzy_slides("SLIDE-CHANGED")
+  changed_status <- build_slide_status(programme, changed_submission, email_lookup, temp_dir, accepted)
+  changed_pablo <- changed_status[changed_status$submission_id == "PABLO", ]
+  assert(changed_pablo$csv_submission_id == "SLIDE-CHANGED", "rules should key on normalized title, not slide CSV submission ID")
+
+  inactive_accept <- fixture_rule("accept", FALSE)
+  inactive_status <- build_slide_status(programme, slides, email_lookup, temp_dir, inactive_accept)
+  inactive_pablo <- inactive_status[inactive_status$submission_id == "PABLO", ]
+  assert(inactive_pablo$status == "missing", "inactive accepted rules should be ignored")
+
+  rejected <- fixture_rule("reject", TRUE)
+  rejected_suggestions <- generate_suggested_matches(programme, slides, email_lookup, rejected)
+  assert(nrow(rejected_suggestions) == 0, "active rejected rules should suppress that suggested match")
+
+  inactive_reject <- fixture_rule("reject", FALSE)
+  inactive_reject_suggestions <- generate_suggested_matches(programme, slides, email_lookup, inactive_reject)
+  assert(nrow(inactive_reject_suggestions) == 1, "inactive rejected rules should not suppress suggestions")
+}
+
+test_interactive_review_injection <- function() {
+  suggestions <- generate_suggested_matches(
+    fixture_fuzzy_programme(),
+    fixture_fuzzy_slides(),
+    fixture_fuzzy_email_lookup()
+  )
+  responses <- c("a")
+  input_fn <- function(prompt = "") {
+    response <- responses[[1]]
+    responses <<- responses[-1]
+    response
+  }
+  output <- character()
+  output_fn <- function(text) {
+    output <<- c(output, text)
+  }
+
+  result <- review_suggested_matches(
+    suggestions,
+    input_fn = input_fn,
+    output_fn = output_fn,
+    now_fn = function() "2026-05-28T12:00:00Z"
+  )
+
+  assert(result$changed, "injected accept response should create a rule")
+  assert(nrow(result$rules) == 1, "interactive review should return the saved decision")
+  assert(result$rules$decision == "accept", "accepted interactive decisions should be persisted as accept rules")
+  assert(result$rules$updated_at == "2026-05-28T12:00:00Z", "interactive review should use injectable timestamps")
 }
 
 test_report_tabs <- function() {
@@ -258,6 +435,7 @@ test_report_tabs <- function() {
     "slide_status",
     "missing_presentations",
     "unmatched_submissions",
+    "suggested_matches",
     "email_mismatches",
     "download_failures"
   )
@@ -314,6 +492,9 @@ tests <- list(
   test_matching_and_email_reconciliation,
   test_workbook_title_fallback_matching,
   test_programme_json_loading_and_overflow_order,
+  test_suggested_fuzzy_matches,
+  test_match_rules,
+  test_interactive_review_injection,
   test_report_tabs,
   test_overwrite_pdf_behavior
 )
