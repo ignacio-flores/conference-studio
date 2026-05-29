@@ -122,7 +122,7 @@ def _build_agenda_cell(session, publish_display: str = PUBLISH_DISPLAY_FULL) -> 
 def _presenter_label(paper, include_moderator: bool = False) -> str:
     presenter = str(getattr(paper, "full_name", "") or "").strip() or "[No presenter]"
     if include_moderator and bool(getattr(paper, "is_moderator", False)):
-        return f"{presenter} (Moderator)"
+        return f"{presenter} (Chair)"
     return presenter
 
 

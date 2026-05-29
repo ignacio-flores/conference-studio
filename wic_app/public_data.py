@@ -81,7 +81,7 @@ def resolve_public_export_settings(
 def _public_presenter_display(name: str, *, is_moderator: bool, show_moderators: bool) -> str:
     presenter = _clean_text(name) or "[No presenter]"
     if show_moderators and is_moderator:
-        return f"{presenter} (Moderator)"
+        return f"{presenter} (Chair)"
     return presenter
 
 

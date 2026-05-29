@@ -3234,7 +3234,7 @@ def _paper_move_label(paper: object) -> str:
 def _presenter_display(paper: object) -> str:
     presenter = _clean_display_text(getattr(paper, "full_name", "")) or "[No presenter]"
     if bool(getattr(paper, "is_moderator", False)):
-        return f"{presenter} (Moderator)"
+        return f"{presenter} (Chair)"
     return presenter
 
 

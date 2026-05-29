@@ -350,7 +350,7 @@ class EngineTests(unittest.TestCase):
         self.assertNotIn("Paper Index", workbook_xml)
         self.assertNotIn("Issues", workbook_xml)
         self.assertNotIn("Title Presenter Index", workbook_xml)
-        self.assertNotIn(" (Moderator)", workbook_xml)
+        self.assertNotIn(" (Chair)", workbook_xml)
         self.assertNotIn(">R1<", workbook_xml)
         self.assertNotIn(">S1<", workbook_xml)
         self.assertNotIn("S1", visible_text_xml)
@@ -389,7 +389,7 @@ class EngineTests(unittest.TestCase):
         self.assertIn("Public settings: rooms=hidden, moderators=hidden, links=shown", visible_text_xml)
         self.assertIn("PaperURL", visible_text_xml)
         self.assertIn("https://example.org/p1.pdf", workbook_xml)
-        self.assertNotIn(" (Moderator)", workbook_xml)
+        self.assertNotIn(" (Chair)", workbook_xml)
         self.assertNotIn(">R1<", workbook_xml)
 
     def test_public_workbook_omits_removed_blank_paper_url_but_keeps_other_links(self) -> None:
@@ -509,7 +509,7 @@ class EngineTests(unittest.TestCase):
             document_xml = self._zip_text(publish_docx_path, ("document.xml",))
 
         self.assertIn(PROGRAMME_CHANGE_NOTICE, document_xml)
-        self.assertNotIn(" (Moderator)", document_xml)
+        self.assertNotIn(" (Chair)", document_xml)
         self.assertNotIn(" | 10h00-11h00 | R1", document_xml)
 
     def test_publish_pdf_starts_with_sessions_and_omits_theme_and_link_metadata(self) -> None:
@@ -749,7 +749,7 @@ class EngineTests(unittest.TestCase):
         )
 
         self.assertIn(PROGRAMME_CHANGE_NOTICE, paragraph_text)
-        self.assertNotIn(" (Moderator)", paragraph_text)
+        self.assertNotIn(" (Chair)", paragraph_text)
         self.assertNotIn(" | 10h00-11h00 | R1", paragraph_text)
 
     def test_session_lifecycle_clear_remove_restore_create_add_room(self) -> None:
