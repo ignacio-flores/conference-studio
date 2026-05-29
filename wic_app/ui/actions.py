@@ -12,6 +12,7 @@ def render_top_actions(
     undo_last_change: Callable[[], bool],
     refresh_state: Callable[[str], None],
     export_publish_excel: Callable,
+    export_presenter_roster_excel: Callable,
     export_publish_pdf: Callable,
     export_publish_docx: Callable,
     publish_public_bundle: Callable,
@@ -61,9 +62,11 @@ def render_top_actions(
                     publish_display=publish_display,
                     show_links=public_show_links,
                 )
+                presenters_path = export_presenter_roster_excel(state)
                 docx_path = export_publish_docx(state, publish_display=publish_display)
                 pdf_path = export_publish_pdf(state, publish_display=publish_display)
                 st.success(f"Publish Excel: {xlsx_path}")
+                st.success(f"Presenter roster: {presenters_path}")
                 st.success(f"Publish PDF: {pdf_path}")
                 st.success(f"Publish Word: {docx_path}")
             except Exception as exc:

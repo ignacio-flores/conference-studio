@@ -20,7 +20,7 @@ import streamlit.components.v1 as components
 
 from bundle_public_app import assemble_public_bundle
 from engine.config import load_conference_config
-from exporters.publish import export_publish_docx, export_publish_excel, export_publish_pdf
+from exporters.publish import export_presenter_roster_excel, export_publish_docx, export_publish_excel, export_publish_pdf
 from preview_public_bundle import ensure_public_bundle_preview
 from reclassification_engine import (
     CLASSIFICATION_OVERRIDES_FILE,
@@ -3016,6 +3016,9 @@ def _render_structure_tab(state, mobile_mode: bool = False) -> None:
                 {
                     "SubmissionID": paper.submission_id,
                     "Presenter": paper.full_name,
+                    "Position": getattr(paper, "position", ""),
+                    "Affiliation": getattr(paper, "affiliation", ""),
+                    "Country": getattr(paper, "country", ""),
                     "Title": paper.title,
                     "Themes": paper.source_themes,
                 }
@@ -3031,6 +3034,9 @@ def _render_structure_tab(state, mobile_mode: bool = False) -> None:
             abstract = st.text_area("Abstract", value="", height=120)
             themes = st.text_input("Themes (comma-separated)", value="")
             email = st.text_input("Email", value="")
+            position = st.text_input("Position", value="")
+            affiliation = st.text_input("Affiliation", value="")
+            country = st.text_input("Country", value="")
             link_to_pdf = st.text_input("PDF URL", value="")
             manual_submit = st.form_submit_button("Add Manual Talk", use_container_width=True)
             if manual_submit:
@@ -3041,6 +3047,9 @@ def _render_structure_tab(state, mobile_mode: bool = False) -> None:
                     abstract=abstract,
                     themes=themes,
                     email=email,
+                    position=position,
+                    affiliation=affiliation,
+                    country=country,
                     link_to_pdf=link_to_pdf,
                     manual_talks_path=MANUAL_TALKS_FILE,
                     paper_placements_path=PAPER_PLACEMENTS_FILE,
@@ -4041,6 +4050,7 @@ if mobile_mode:
         undo_last_change=_undo_last_change,
         refresh_state=_refresh_state,
         export_publish_excel=export_publish_excel,
+        export_presenter_roster_excel=export_presenter_roster_excel,
         export_publish_pdf=export_publish_pdf,
         export_publish_docx=export_publish_docx,
         publish_public_bundle=_publish_public_bundle,
@@ -4082,6 +4092,7 @@ else:
             undo_last_change=_undo_last_change,
             refresh_state=_refresh_state,
             export_publish_excel=export_publish_excel,
+            export_presenter_roster_excel=export_presenter_roster_excel,
             export_publish_pdf=export_publish_pdf,
             export_publish_docx=export_publish_docx,
             publish_public_bundle=_publish_public_bundle,

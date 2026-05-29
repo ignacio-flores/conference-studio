@@ -23,6 +23,7 @@ from exporters.publish import (
     PUBLISH_DISPLAY_PUBLIC_SAFE,
     PROGRAMME_CHANGE_NOTICE,
     export_draft_workbook,
+    export_presenter_roster_excel,
     export_public_excel,
     export_public_payload,
     export_publish_docx,
@@ -36,6 +37,7 @@ from reclassification_engine import (
     PAPER_ARCHIVE_OVERRIDES_FILE,
     PAPER_METADATA_OVERRIDES_FILE,
     PAPER_PLACEMENTS_FILE,
+    XlsxXmlReader,
     PROGRAMME_FILE,
     PROGRAMME_LAYOUT_OVERRIDES_FILE,
     SESSION_NAME_OVERRIDES_FILE,
@@ -56,6 +58,7 @@ from reclassification_engine import (
     load_paper_archive_overrides,
     load_session_structure_rows,
     load_session_name_overrides,
+    parse_submissions,
     parse_programme_slots,
     relabel_day_sessions,
     rename_room_for_day,
@@ -162,6 +165,19 @@ class EngineTests(unittest.TestCase):
                 if name.endswith(suffixes)
             )
 
+    def _xlsx_records(self, workbook_path: Path, sheet_name: str) -> list[dict[str, str]]:
+        reader = XlsxXmlReader(workbook_path)
+        rows = reader.read_sheet_rows(sheet_name)
+        if not rows:
+            return []
+        header_cells = rows[0][1]
+        max_col = max(header_cells.keys()) if header_cells else 0
+        headers = [header_cells.get(idx, "") for idx in range(1, max_col + 1)]
+        records = []
+        for _, cells in rows[1:]:
+            records.append({header: cells.get(idx, "") for idx, header in enumerate(headers, start=1)})
+        return records
+
     def _build_state(self, paths: dict, submissions: Path, programme: Path):
         return build_programme_state(
             submissions_path=submissions,
@@ -188,6 +204,14 @@ class EngineTests(unittest.TestCase):
         config = load_conference_config()
         slots = parse_programme_slots(PROGRAMME_FILE, config)
         self.assertEqual(len(slots), config.validation.expected_slots)
+
+    def test_parse_submissions_preserves_presenter_affiliation_metadata(self) -> None:
+        papers = parse_submissions(SUBMISSIONS_FILE, load_conference_config())
+        paper = next(candidate for candidate in papers if candidate.submission_id == "0Q505JN")
+
+        self.assertEqual(paper.position, "Researcher at Institution")
+        self.assertEqual(paper.affiliation, "Paris School of Economics")
+        self.assertEqual(paper.country, "france")
 
     def test_layout_override_conflict_moves_to_overflow(self) -> None:
         state = build_programme_state()
@@ -264,6 +288,7 @@ class EngineTests(unittest.TestCase):
             public_xlsx_path = export_public_excel(state, tmp_path / "public.xlsx")
             public_payload_path = export_public_payload(state, tmp_path / "programme.json")
             publish_xlsx_path = export_publish_excel(state, tmp_path / "publish.xlsx")
+            presenter_roster_path = export_presenter_roster_excel(state, tmp_path / "presenters.xlsx")
             try:
                 publish_docx_path = export_publish_docx(state, tmp_path / "publish.docx")
             except RuntimeError as exc:
@@ -272,11 +297,13 @@ class EngineTests(unittest.TestCase):
             self.assertTrue(public_xlsx_path.exists())
             self.assertTrue(public_payload_path.exists())
             self.assertTrue(publish_xlsx_path.exists())
+            self.assertTrue(presenter_roster_path.exists())
             self.assertTrue(publish_docx_path.exists())
             self.assertGreater(draft_path.stat().st_size, 0)
             self.assertGreater(public_xlsx_path.stat().st_size, 0)
             self.assertGreater(public_payload_path.stat().st_size, 0)
             self.assertGreater(publish_xlsx_path.stat().st_size, 0)
+            self.assertGreater(presenter_roster_path.stat().st_size, 0)
             self.assertGreater(publish_docx_path.stat().st_size, 0)
             payload = json.loads(public_payload_path.read_text(encoding="utf-8"))
             if payload["papers"]:
@@ -409,6 +436,91 @@ class EngineTests(unittest.TestCase):
         self.assertIn("PaperURL", visible_text_xml)
         self.assertNotIn("https://example.org/p1.pdf", workbook_xml)
         self.assertIn("https://example.org/p2.pdf", workbook_xml)
+
+    def test_presenter_roster_dedupes_and_flags_review_rows(self) -> None:
+        scheduled = SimpleNamespace(
+            submission_id="P1",
+            full_name="Alex Example",
+            email="alex@example.org",
+            position="Professor",
+            affiliation="University A",
+            country="France",
+            title="Scheduled Talk",
+            primary_theme="Theme A",
+            detailed_subtheme="Subtheme A",
+            placement_status="scheduled",
+            session_code="S1",
+            session_title="Session One",
+            day_label="Day 1",
+            time="10:00-11:00",
+            room="R1",
+            is_moderator=False,
+            source="submissions",
+        )
+        unassigned = SimpleNamespace(
+            submission_id="P2",
+            full_name=" alex   example ",
+            email="alex.alt@example.org",
+            position="Professor",
+            affiliation="University A",
+            country="France",
+            title="Unassigned Talk",
+            primary_theme="Theme B",
+            detailed_subtheme="Subtheme B",
+            placement_status="unassigned",
+            session_code="",
+            session_title="",
+            day_label="",
+            time="",
+            room="",
+            is_moderator=False,
+            source="submissions",
+        )
+        multi_name = SimpleNamespace(
+            submission_id="P3",
+            full_name="Pat Presenter & Co Author",
+            email="pat@example.org",
+            position="Researcher",
+            affiliation="",
+            country="Spain",
+            title="Overflow Talk",
+            primary_theme="Theme C",
+            detailed_subtheme="Subtheme C",
+            placement_status="overflow",
+            session_code="S2",
+            session_title="Session Two",
+            day_label="Day 2",
+            time="12:00-13:00",
+            room="R2",
+            is_moderator=True,
+            source="manual",
+        )
+        archived = SimpleNamespace(
+            submission_id="P4",
+            full_name="Archived Presenter",
+            email="archived@example.org",
+            title="Archived Talk",
+        )
+        state = SimpleNamespace(papers=[scheduled, unassigned, multi_name], archived_papers=[archived])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            roster_path = export_presenter_roster_excel(state, Path(tmp) / "presenters.xlsx")
+            records = self._xlsx_records(roster_path, "Presenters")
+
+        self.assertEqual(len(records), 2)
+        by_presenter = {record["Presenter"]: record for record in records}
+        alex = by_presenter["Alex Example"]
+        self.assertEqual(alex["TalkCount"], "2")
+        self.assertEqual(alex["Affiliation"], "University A")
+        self.assertIn("Unassigned Talk", alex["Titles"])
+        self.assertIn("unassigned", alex["PlacementStatuses"])
+        self.assertIn("Multiple emails", alex["ReviewFlags"])
+        self.assertNotIn("Archived Presenter", by_presenter)
+
+        pat = by_presenter["Pat Presenter & Co Author"]
+        self.assertIn("Name may contain multiple people", pat["ReviewFlags"])
+        self.assertIn("Missing affiliation", pat["ReviewFlags"])
+        self.assertEqual(pat["Moderator"], "Yes")
 
     def test_publish_workbook_treats_overflow_papers_as_session_presentations_and_adds_disclaimer(self) -> None:
         state = self._simple_publish_state()

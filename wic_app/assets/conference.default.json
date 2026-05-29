@@ -6,6 +6,7 @@
     "programme": "WIC2026_Programme.xlsx",
     "draft_output": "WIC2026_Programme_Draft.xlsx",
     "publish_xlsx_output": "WIC2026_Programme_Publish.xlsx",
+    "presenters_xlsx_output": "WIC2026_Presenters.xlsx",
     "publish_pdf_output": "WIC2026_Programme_Publish.pdf",
     "publish_docx_output": "WIC2026_Programme_Publish.docx"
   },

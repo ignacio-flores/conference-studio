@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import html
+import re
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,7 @@ from reclassification_engine import (
     DAY_ORDER,
     DRAFT_OUTPUT_FILE,
     EXPORT_DIR,
+    PRESENTERS_XLSX_FILE,
     PUBLISH_DOCX_FILE,
     PUBLISH_PDF_FILE,
     PUBLISH_XLSX_FILE,
@@ -843,6 +845,188 @@ def export_public_excel(
     return output_path
 
 
+def _clean_roster_text(value: object) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _presenter_dedupe_key(value: object) -> str:
+    return _clean_roster_text(value).casefold()
+
+
+def _append_unique(values: List[str], value: object) -> None:
+    cleaned = _clean_roster_text(value)
+    if not cleaned:
+        return
+    existing_keys = {_presenter_dedupe_key(existing) for existing in values}
+    if _presenter_dedupe_key(cleaned) not in existing_keys:
+        values.append(cleaned)
+
+
+def _joined_unique(values: List[str]) -> str:
+    return "\n".join(values)
+
+
+def _paper_session_label(paper: object) -> str:
+    session_code = _clean_roster_text(getattr(paper, "session_code", ""))
+    session_title = _clean_roster_text(getattr(paper, "session_title", ""))
+    if session_code and session_title:
+        return f"{session_code} | {session_title}"
+    return session_code or session_title or "[Unassigned]"
+
+
+def _paper_day_time_room(paper: object) -> str:
+    parts = [
+        _clean_roster_text(getattr(paper, "day_label", "")),
+        _clean_roster_text(getattr(paper, "time", "")),
+        _clean_roster_text(getattr(paper, "room", "")),
+    ]
+    joined = " | ".join(part for part in parts if part)
+    return joined or "[Unassigned]"
+
+
+def _paper_theme_label(paper: object) -> str:
+    primary = _clean_roster_text(getattr(paper, "primary_theme", ""))
+    subtheme = _clean_roster_text(getattr(paper, "detailed_subtheme", ""))
+    if primary and subtheme:
+        return f"{primary} | {subtheme}"
+    return primary or subtheme
+
+
+def _name_review_flags(name: str) -> List[str]:
+    flags: List[str] = []
+    if re.search(r"\s(?:&|and)\s", name, flags=re.IGNORECASE):
+        flags.append("Name may contain multiple people")
+    if re.search(r"\([^)]*\b(?:presenter|co-?author|chair|moderator)\b[^)]*\)", name, flags=re.IGNORECASE):
+        flags.append("Name contains role label")
+    return flags
+
+
+def export_presenter_roster_excel(
+    state: ProgrammeState,
+    output_path: Path = PRESENTERS_XLSX_FILE,
+) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    groups: Dict[str, Dict[str, object]] = {}
+    for paper in sorted(
+        list(getattr(state, "papers", []) or []),
+        key=lambda p: (
+            _clean_roster_text(getattr(p, "full_name", "")).casefold(),
+            _clean_roster_text(getattr(p, "submission_id", "")),
+        ),
+    ):
+        presenter = _clean_roster_text(getattr(paper, "full_name", "")) or "[No presenter]"
+        key = _presenter_dedupe_key(presenter)
+        group = groups.setdefault(
+            key,
+            {
+                "presenter": presenter,
+                "emails": [],
+                "positions": [],
+                "affiliations": [],
+                "countries": [],
+                "submission_ids": [],
+                "titles": [],
+                "statuses": [],
+                "sessions": [],
+                "day_time_rooms": [],
+                "themes": [],
+                "sources": [],
+                "talk_count": 0,
+                "moderator": False,
+            },
+        )
+        group["talk_count"] = int(group["talk_count"]) + 1
+        group["moderator"] = bool(group["moderator"]) or bool(getattr(paper, "is_moderator", False))
+        _append_unique(group["emails"], getattr(paper, "email", ""))
+        _append_unique(group["positions"], getattr(paper, "position", ""))
+        _append_unique(group["affiliations"], getattr(paper, "affiliation", ""))
+        _append_unique(group["countries"], getattr(paper, "country", ""))
+        _append_unique(group["submission_ids"], getattr(paper, "submission_id", ""))
+        _append_unique(group["titles"], getattr(paper, "title", ""))
+        _append_unique(group["statuses"], getattr(paper, "placement_status", "") or "scheduled")
+        _append_unique(group["sessions"], _paper_session_label(paper))
+        _append_unique(group["day_time_rooms"], _paper_day_time_room(paper))
+        _append_unique(group["themes"], _paper_theme_label(paper))
+        _append_unique(group["sources"], getattr(paper, "source", "") or "submissions")
+
+    wb = xlsxwriter.Workbook(str(output_path))
+    header_fmt = wb.add_format({"bold": True, "bg_color": "#E8EEF8", "border": 1, "valign": "top"})
+    cell_fmt = wb.add_format({"border": 1, "valign": "top"})
+    wrap_fmt = wb.add_format({"border": 1, "valign": "top", "text_wrap": True})
+    count_fmt = wb.add_format({"border": 1, "valign": "top", "align": "center"})
+    flag_fmt = wb.add_format({"border": 1, "valign": "top", "text_wrap": True, "font_color": "#7A4E00"})
+
+    ws = wb.add_worksheet("Presenters")
+    headers = [
+        "Presenter",
+        "EmailAddresses",
+        "Position",
+        "Affiliation",
+        "Country",
+        "TalkCount",
+        "SubmissionIDs",
+        "Titles",
+        "PlacementStatuses",
+        "Sessions",
+        "DayTimeRooms",
+        "Themes",
+        "Moderator",
+        "Sources",
+        "ReviewFlags",
+    ]
+    ws.write_row(0, 0, headers, header_fmt)
+    ws.freeze_panes(1, 0)
+    ws.autofilter(0, 0, 0, len(headers) - 1)
+    widths = [28, 30, 24, 34, 18, 10, 20, 52, 18, 42, 34, 42, 12, 16, 34]
+    for idx, width in enumerate(widths):
+        ws.set_column(idx, idx, width)
+
+    for row_idx, group in enumerate(
+        sorted(groups.values(), key=lambda row: _presenter_dedupe_key(row["presenter"])),
+        start=1,
+    ):
+        flags = _name_review_flags(str(group["presenter"]))
+        if not group["affiliations"]:
+            flags.append("Missing affiliation")
+        for field_name, label in [
+            ("emails", "Multiple emails"),
+            ("positions", "Multiple positions"),
+            ("affiliations", "Multiple affiliations"),
+            ("countries", "Multiple countries"),
+        ]:
+            if len(group[field_name]) > 1:
+                flags.append(label)
+
+        values = [
+            group["presenter"],
+            _joined_unique(group["emails"]),
+            _joined_unique(group["positions"]),
+            _joined_unique(group["affiliations"]),
+            _joined_unique(group["countries"]),
+            group["talk_count"],
+            _joined_unique(group["submission_ids"]),
+            _joined_unique(group["titles"]),
+            _joined_unique(group["statuses"]),
+            _joined_unique(group["sessions"]),
+            _joined_unique(group["day_time_rooms"]),
+            _joined_unique(group["themes"]),
+            "Yes" if group["moderator"] else "No",
+            _joined_unique(group["sources"]),
+            _joined_unique(flags),
+        ]
+        for col_idx, value in enumerate(values):
+            if col_idx == 5:
+                ws.write(row_idx, col_idx, value, count_fmt)
+            elif col_idx == 14 and value:
+                ws.write(row_idx, col_idx, value, flag_fmt)
+            else:
+                ws.write(row_idx, col_idx, value, wrap_fmt if isinstance(value, str) and "\n" in value else cell_fmt)
+
+    wb.close()
+    return output_path
+
+
 def export_publish_excel(
     state: ProgrammeState,
     output_path: Path = PUBLISH_XLSX_FILE,
@@ -1191,12 +1375,14 @@ def export_all(
     publish_xlsx_output: Path = PUBLISH_XLSX_FILE,
     publish_pdf_output: Path = PUBLISH_PDF_FILE,
     publish_docx_output: Path = PUBLISH_DOCX_FILE,
+    presenters_xlsx_output: Path = PRESENTERS_XLSX_FILE,
     publish_display: str = PUBLISH_DISPLAY_FULL,
 ) -> Dict[str, Path]:
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     return {
         "draft_xlsx": export_draft_workbook(state, draft_output),
         "publish_xlsx": export_publish_excel(state, publish_xlsx_output, publish_display=publish_display),
+        "presenters_xlsx": export_presenter_roster_excel(state, presenters_xlsx_output),
         "publish_pdf": export_publish_pdf(state, publish_pdf_output, publish_display=publish_display),
         "publish_docx": export_publish_docx(state, publish_docx_output, publish_display=publish_display),
     }

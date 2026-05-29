@@ -21,6 +21,7 @@ class PublicReleaseCliTests(unittest.TestCase):
             files = dict(default_config.get("files", {}))
             files["draft_output"] = str(tmp_path / "draft.xlsx")
             files["publish_xlsx_output"] = str(tmp_path / "publish.xlsx")
+            files["presenters_xlsx_output"] = str(tmp_path / "presenters.xlsx")
             files["publish_pdf_output"] = str(tmp_path / "publish.pdf")
             files["publish_docx_output"] = str(tmp_path / "publish.docx")
             files["public_json_output"] = str(tmp_path / "programme.json")
@@ -55,12 +56,14 @@ class PublicReleaseCliTests(unittest.TestCase):
             self.assertIn("Public export settings: rooms=hidden, moderators=hidden, links=shown", output)
             self.assertIn("Generated public JSON", output)
             self.assertIn("Generated public workbook", output)
+            self.assertIn("Generated presenter roster", output)
             self.assertTrue(
                 ("Generated publish Word" in output) or ("Publish Word skipped" in output),
                 output,
             )
             self.assertTrue((tmp_path / "programme.json").exists())
             self.assertTrue((tmp_path / "programme_public.xlsx").exists())
+            self.assertTrue((tmp_path / "presenters.xlsx").exists())
             payload = json.loads((tmp_path / "programme.json").read_text(encoding="utf-8"))
             self.assertEqual(
                 payload["public_settings"],

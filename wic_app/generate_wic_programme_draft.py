@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Optional
 
 from runtime_compat import install_hashlib_usedforsecurity_compat
 
@@ -22,6 +23,7 @@ from exporters.publish import (
     export_draft_workbook,
     export_public_excel,
     export_public_payload,
+    export_presenter_roster_excel,
     export_publish_docx,
     export_publish_excel,
     export_publish_pdf,
@@ -29,11 +31,35 @@ from exporters.publish import (
 from public_data import PUBLIC_JSON_FILE, PUBLIC_XLSX_FILE
 from reclassification_engine import (
     DRAFT_OUTPUT_FILE,
+    PRESENTERS_XLSX_FILE,
     PUBLISH_DOCX_FILE,
     PUBLISH_PDF_FILE,
     PUBLISH_XLSX_FILE,
     build_programme_state,
 )
+
+
+def add_boolean_optional_argument(
+    parser: argparse.ArgumentParser,
+    flag: str,
+    *,
+    default: Optional[bool],
+    help: str,
+) -> None:
+    if hasattr(argparse, "BooleanOptionalAction"):
+        parser.add_argument(
+            flag,
+            action=argparse.BooleanOptionalAction,
+            default=default,
+            help=help,
+        )
+        return
+
+    dest = flag.lstrip("-").replace("-", "_")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(flag, dest=dest, action="store_true", help=help)
+    group.add_argument(f"--no-{flag.lstrip('-')}", dest=dest, action="store_false", help=argparse.SUPPRESS)
+    parser.set_defaults(**{dest: default})
 
 
 def main() -> None:
@@ -56,21 +82,21 @@ def main() -> None:
         default=PUBLISH_DISPLAY_FULL,
         help="Publish display mode: full or public_safe.",
     )
-    parser.add_argument(
+    add_boolean_optional_argument(
+        parser,
         "--public-rooms",
-        action=argparse.BooleanOptionalAction,
         default=None,
         help="Show room names in public JSON/XLSX outputs. Defaults to the legacy mapping from --publish-display.",
     )
-    parser.add_argument(
+    add_boolean_optional_argument(
+        parser,
         "--public-moderators",
-        action=argparse.BooleanOptionalAction,
         default=None,
         help="Show moderator labels in public JSON/XLSX outputs. Defaults to the legacy mapping from --publish-display.",
     )
-    parser.add_argument(
+    add_boolean_optional_argument(
+        parser,
         "--public-links",
-        action=argparse.BooleanOptionalAction,
         default=None,
         help="Show paper URLs in public JSON/XLSX outputs when available.",
     )
@@ -88,6 +114,7 @@ def main() -> None:
     publish_xlsx_output = PUBLISH_XLSX_FILE.parent / conference_config.files.get("publish_xlsx_output", PUBLISH_XLSX_FILE.name)
     publish_pdf_output = PUBLISH_PDF_FILE.parent / conference_config.files.get("publish_pdf_output", PUBLISH_PDF_FILE.name)
     publish_docx_output = PUBLISH_DOCX_FILE.parent / conference_config.files.get("publish_docx_output", PUBLISH_DOCX_FILE.name)
+    presenters_xlsx_output = PRESENTERS_XLSX_FILE.parent / conference_config.files.get("presenters_xlsx_output", PRESENTERS_XLSX_FILE.name)
     public_json_output = PUBLIC_JSON_FILE.parent / conference_config.files.get("public_json_output", PUBLIC_JSON_FILE.name)
     public_xlsx_output = PUBLIC_XLSX_FILE.parent / conference_config.files.get("public_xlsx_output", PUBLIC_XLSX_FILE.name)
 
@@ -160,6 +187,8 @@ def main() -> None:
             show_links=public_show_links,
         )
         print(f"Generated publish workbook: {xlsx_path}")
+        presenters_path = export_presenter_roster_excel(state, presenters_xlsx_output)
+        print(f"Generated presenter roster: {presenters_path}")
         try:
             docx_path = export_publish_docx(state, publish_docx_output, publish_display=args.publish_display)
             print(f"Generated publish Word: {docx_path}")

@@ -51,6 +51,7 @@ DRAFT_OUTPUT_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("draft_outpu
 PUBLISH_XLSX_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("publish_xlsx_output", "WIC2026_Programme_Publish.xlsx")
 PUBLISH_PDF_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("publish_pdf_output", "WIC2026_Programme_Publish.pdf")
 PUBLISH_DOCX_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("publish_docx_output", "WIC2026_Programme_Publish.docx")
+PRESENTERS_XLSX_FILE = EXPORT_DIR / ACTIVE_CONFERENCE_CONFIG.files.get("presenters_xlsx_output", "WIC2026_Presenters.xlsx")
 
 DAY_ORDER = list(ACTIVE_CONFERENCE_CONFIG.days)
 DAY_TO_NUM = ACTIVE_CONFERENCE_CONFIG.day_to_num
@@ -421,6 +422,9 @@ MANUAL_TALKS_HEADERS = [
     "SubmissionID",
     "FullName",
     "EmailAddress",
+    "Position",
+    "Affiliation",
+    "Country",
     "Title",
     "Abstract",
     "Themes",
@@ -446,6 +450,9 @@ class Paper:
     title: str
     abstract: str
     link_to_pdf: str
+    position: str = ""
+    affiliation: str = ""
+    country: str = ""
     source: str = "submissions"
     primary_theme: str = ""
     detailed_subtheme: str = ""
@@ -838,6 +845,12 @@ def parse_submissions(path: Path, config: ConferenceConfig = ACTIVE_CONFERENCE_C
         if score not in accepted_scores:
             continue
 
+        def optional_value(column_name: str) -> str:
+            idx = col_idx.get(column_name)
+            if idx is None:
+                return ""
+            return str(cells.get(idx, "")).strip()
+
         accepted.append(
             Paper(
                 submission_id=str(cells.get(col_idx["SubmissionID"], "")).strip(),
@@ -848,6 +861,9 @@ def parse_submissions(path: Path, config: ConferenceConfig = ACTIVE_CONFERENCE_C
                 title=str(cells.get(col_idx["Title"], "")).strip(),
                 abstract=str(cells.get(col_idx["Abstract"], "")).strip(),
                 link_to_pdf=str(cells.get(col_idx["LinkToPDF"], "")).strip(),
+                position=optional_value("Position"),
+                affiliation=optional_value("NameofUniversityInstitution"),
+                country=optional_value("Country"),
             )
         )
 
@@ -1484,6 +1500,9 @@ def load_manual_talks(path: Path = MANUAL_TALKS_FILE) -> List[Paper]:
                 title=str(row.get("Title", "")).strip(),
                 abstract=str(row.get("Abstract", "")).strip(),
                 link_to_pdf=str(row.get("LinkToPDF", "")).strip(),
+                position=str(row.get("Position", "")).strip(),
+                affiliation=str(row.get("Affiliation", "")).strip(),
+                country=str(row.get("Country", "")).strip(),
                 source="manual",
             )
         )
@@ -1503,6 +1522,9 @@ def write_manual_talks(rows: Iterable[Dict[str, str]], path: Path = MANUAL_TALKS
             "SubmissionID": sid,
             "FullName": str(row.get("FullName", "")).strip(),
             "EmailAddress": str(row.get("EmailAddress", "")).strip(),
+            "Position": str(row.get("Position", "")).strip(),
+            "Affiliation": str(row.get("Affiliation", "")).strip(),
+            "Country": str(row.get("Country", "")).strip(),
             "Title": str(row.get("Title", "")).strip(),
             "Abstract": str(row.get("Abstract", "")).strip(),
             "Themes": str(row.get("Themes", "")).strip(),
@@ -2849,6 +2871,9 @@ def create_manual_talk(
     abstract: str = "",
     themes: str = "",
     email: str = "",
+    position: str = "",
+    affiliation: str = "",
+    country: str = "",
     link_to_pdf: str = "",
     reviewer_score: str = "1",
     submission_id: str = "",
@@ -2875,6 +2900,9 @@ def create_manual_talk(
             "SubmissionID": sid,
             "FullName": name,
             "EmailAddress": str(email).strip(),
+            "Position": str(position).strip(),
+            "Affiliation": str(affiliation).strip(),
+            "Country": str(country).strip(),
             "Title": talk_title,
             "Abstract": str(abstract).strip(),
             "Themes": str(themes).strip(),
@@ -3508,6 +3536,9 @@ def papers_to_rows(state: ProgrammeState) -> List[Dict[str, object]]:
                 "SubmissionID": paper.submission_id,
                 "FullName": paper.full_name,
                 "EmailAddress": paper.email,
+                "Position": paper.position,
+                "Affiliation": paper.affiliation,
+                "Country": paper.country,
                 "ReviewerScore": paper.reviewer_score,
                 "SourceThemes": paper.source_themes,
                 "PrimaryTheme": paper.primary_theme,
