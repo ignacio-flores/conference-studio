@@ -330,6 +330,44 @@ fixture_fuzzy_email_lookup <- function() {
   )
 }
 
+fixture_author_match_programme <- function() {
+  tibble(
+    submission_id = c("AUTHOR", "DISPLAY", "WORKBOOK", "TITLE"),
+    title = c(
+      "A Completely Different Programme Title",
+      "Another Unrelated Programme Title",
+      "A Third Unrelated Programme Title",
+      "Cash Transfers and Tax Compliance Evidence from Argentina"
+    ),
+    authors = c("Pablo Perez", "Different Author", "Different Author", "Someone Else"),
+    presenter_display = c("Session Chair", "Pablo Perez (Moderator)", "Different Presenter", "Other Presenter"),
+    room = c("R2-01", "P006", "P007", "P008"),
+    day_num = c(1L, 1L, 1L, 1L),
+    day_label = c("Day 1 (4th June)", "Day 1 (4th June)", "Day 1 (4th June)", "Day 1 (4th June)"),
+    block_num = c(1L, 1L, 1L, 1L),
+    block_label = c("SESSION 1", "SESSION 1", "SESSION 1", "SESSION 1"),
+    session_title = c("Public Finance", "Mobility", "Wealth", "Distribution"),
+    time = c("11h30-13h00", "11h30-13h00", "11h30-13h00", "11h30-13h00"),
+    talk_index = c(1L, 2L, 3L, 4L),
+    title_norm = normalize_title(title)
+  )
+}
+
+fixture_author_match_email_lookup <- function() {
+  tibble(
+    submission_id = c("AUTHOR", "DISPLAY", "WORKBOOK", "TITLE"),
+    workbook_email = c("author@example.com", "display@example.com", "workbook@example.com", "title@example.com"),
+    workbook_title = c(
+      "A Completely Different Programme Title",
+      "Another Unrelated Programme Title",
+      "A Third Unrelated Programme Title",
+      "Cash Transfers and Tax Compliance Evidence from Argentina"
+    ),
+    workbook_title_norm = normalize_title(workbook_title),
+    workbook_full_name = c("Different Workbook Name", "Different Workbook Name", "Pablo Perez", "Someone Else")
+  )
+}
+
 fixture_rule <- function(decision = "accept", active = TRUE) {
   slide <- fixture_fuzzy_slides()
   tibble(
@@ -375,6 +413,75 @@ test_suggested_fuzzy_matches <- function() {
   assert(any(pablo_suggestions$email_match), "suggestion should record exact email evidence")
   assert(any(pablo_suggestions$name_match), "suggestion should record normalized submitter/presenter evidence")
   assert(any(pablo_suggestions$title_similarity >= 0.70), "suggestion should include title similarity evidence")
+}
+
+test_author_name_suggested_matches <- function() {
+  programme <- fixture_author_match_programme()
+  slides <- fixture_fuzzy_slides() %>%
+    mutate(slides_csv_email = "nomatch@example.com")
+  email_lookup <- fixture_author_match_email_lookup()
+
+  suggestions <- generate_suggested_matches(
+    programme,
+    slides,
+    email_lookup,
+    max_suggestions = 4
+  )
+
+  assert(nrow(suggestions) == 4, "author-name and title-similarity evidence should produce suggestions")
+  assert(
+    max(which(suggestions$name_match)) < which(suggestions$programme_submission_id == "TITLE"),
+    "author-name suggestions should sort ahead of title-only suggestions"
+  )
+  author_suggestion <- suggestions[suggestions$programme_submission_id == "AUTHOR", ]
+  assert(
+    author_suggestion$match_reason == "author_name" &&
+      author_suggestion$name_match_source == "authors" &&
+      author_suggestion$title_similarity < 0.70,
+    "matching programme authors should be sufficient even when title similarity is low"
+  )
+
+  sources <- suggestions$name_match_source
+  names(sources) <- suggestions$programme_submission_id
+  assert(sources[["AUTHOR"]] == "authors", "author matching should use programme authors")
+  assert(sources[["DISPLAY"]] == "presenter_display", "author matching should use stripped presenter display")
+  assert(sources[["WORKBOOK"]] == "workbook_full_name", "author matching should use workbook full names")
+
+  title_only <- suggestions[suggestions$programme_submission_id == "TITLE", ]
+  assert(
+    title_only$match_reason == "title_similarity" && !title_only$name_match,
+    "title-only fuzzy suggestions should remain available after author-name suggestions"
+  )
+
+  accepted <- review_suggested_matches(
+    author_suggestion,
+    programme = programme,
+    input_fn = function(prompt = "") "a",
+    output_fn = function(text) invisible(NULL),
+    now_fn = function() "2026-05-28T12:00:00Z"
+  )
+  assert(accepted$changed && accepted$rules$decision == "accept", "accepted author-name suggestions should persist accept rules")
+
+  status <- build_slide_status(programme, slides, email_lookup, tempfile("slides-author-output-"), accepted$rules)
+  author_status <- status[status$submission_id == "AUTHOR", ]
+  assert(author_status$status == "matched" && author_status$match_method == "manual_rule", "accepted author-name suggestions should apply as manual rules")
+
+  rejected <- upsert_match_rule(
+    empty_match_rules(),
+    programme_submission_id = "AUTHOR",
+    submitted_title_norm = slides$title_norm[[1]],
+    decision = "reject",
+    submitted_title = slides$submitted_title[[1]],
+    programme_title = programme$title[programme$submission_id == "AUTHOR"][[1]],
+    submitter_name = slides$submitter_name[[1]],
+    programme_presenter = programme$presenter_display[programme$submission_id == "AUTHOR"][[1]],
+    updated_at = "2026-05-28T12:00:00Z"
+  )
+  rejected_suggestions <- generate_suggested_matches(programme, slides, email_lookup, rejected, max_suggestions = 4)
+  assert(
+    !"AUTHOR" %in% rejected_suggestions$programme_submission_id,
+    "rejected author-name suggestions should be suppressed on later runs"
+  )
 }
 
 test_match_rules <- function() {
@@ -682,6 +789,7 @@ tests <- list(
   test_workbook_title_fallback_matching,
   test_programme_json_loading_and_overflow_order,
   test_suggested_fuzzy_matches,
+  test_author_name_suggested_matches,
   test_match_rules,
   test_unmatched_decisions,
   test_interactive_review_injection,

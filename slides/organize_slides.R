@@ -155,6 +155,27 @@ normalize_name <- function(x) {
   str_squish(x)
 }
 
+normalize_name_variants <- function(x) {
+  x <- clean_text(x)
+  parts <- str_split(x, "\\s+(?:&|and)\\s+|\\s*/\\s*|,")
+  lapply(parts, function(values) {
+    values <- values[clean_text(values) != ""]
+    unique(normalize_name(values))
+  })
+}
+
+normalized_name_matches <- function(left_norm, right_values) {
+  left_norm <- clean_text(left_norm)
+  right_values <- clean_text(right_values)
+  if (length(right_values) == 1 && length(left_norm) > 1) {
+    right_values <- rep(right_values, length(left_norm))
+  }
+  right_variants <- normalize_name_variants(right_values)
+  vapply(seq_along(left_norm), function(i) {
+    left_norm[[i]] != "" && left_norm[[i]] %in% right_variants[[i]]
+  }, logical(1))
+}
+
 normalize_email <- function(x) {
   str_to_lower(clean_text(x))
 }
@@ -1184,6 +1205,8 @@ empty_suggested_matches <- function() {
     title_similarity = numeric(),
     email_match = logical(),
     name_match = logical(),
+    name_match_source = character(),
+    match_reason = character(),
     rule_decision = character(),
     rule_active = logical(),
     rule_notes = character(),
@@ -1222,6 +1245,9 @@ generate_suggested_matches <- function(
   existing_matches = NULL,
   max_suggestions = 3
 ) {
+  if (!"authors" %in% names(programme)) {
+    programme$authors <- ""
+  }
   email_lookup <- ensure_email_lookup_columns(email_lookup)
   rules <- coerce_match_rules(match_rules)
   decision_state <- unmatched_decision_state(unmatched_decisions)
@@ -1263,7 +1289,9 @@ generate_suggested_matches <- function(
       programme_title = title,
       programme_title_norm = title_norm,
       programme_presenter = presenter_display,
-      programme_presenter_norm = normalize_name(presenter_display),
+      programme_authors = authors,
+      programme_presenter_for_match = strip_presenter_role_labels(presenter_display),
+      workbook_full_name,
       workbook_email,
       workbook_email_norm = normalize_email(workbook_email),
       room,
@@ -1283,13 +1311,26 @@ generate_suggested_matches <- function(
       email_match = submitter_email_norm != "" &
         workbook_email_norm != "" &
         submitter_email_norm == workbook_email_norm,
-      name_match = submitter_name_norm != "" &
-        programme_presenter_norm != "" &
-        submitter_name_norm == programme_presenter_norm
+      author_name_match = normalized_name_matches(submitter_name_norm, programme_authors),
+      presenter_name_match = normalized_name_matches(submitter_name_norm, programme_presenter_for_match),
+      workbook_name_match = normalized_name_matches(submitter_name_norm, workbook_full_name),
+      name_match = author_name_match | presenter_name_match | workbook_name_match,
+      name_match_source = case_when(
+        author_name_match ~ "authors",
+        presenter_name_match ~ "presenter_display",
+        workbook_name_match ~ "workbook_full_name",
+        TRUE ~ ""
+      ),
+      match_reason = case_when(
+        name_match ~ "author_name",
+        email_match & title_similarity >= 0.70 ~ "email_title",
+        title_similarity >= 0.92 ~ "title_similarity",
+        TRUE ~ ""
+      )
     ) %>%
     filter(
-      (email_match & title_similarity >= 0.70) |
-        (name_match & title_similarity >= 0.80) |
+      name_match |
+        (email_match & title_similarity >= 0.70) |
         title_similarity >= 0.92
     ) %>%
     left_join(
@@ -1299,8 +1340,8 @@ generate_suggested_matches <- function(
     filter(!(rule_active %in% TRUE & rule_decision == "reject")) %>%
     arrange(
       submitted_title_norm,
-      desc(email_match),
       desc(name_match),
+      desc(email_match),
       desc(title_similarity),
       programme_submission_id
     ) %>%
@@ -1325,6 +1366,8 @@ generate_suggested_matches <- function(
       title_similarity,
       email_match,
       name_match,
+      name_match_source,
+      match_reason,
       rule_decision = ifelse(is.na(rule_decision), "", rule_decision),
       rule_active = ifelse(is.na(rule_active), FALSE, rule_active),
       rule_notes = ifelse(is.na(rule_notes), "", rule_notes),
@@ -1357,11 +1400,25 @@ write_review_line <- function(output_fn, text = "") {
 }
 
 format_match_evidence <- function(suggestion) {
+  name_source <- if ("name_match_source" %in% names(suggestion)) {
+    clean_text(suggestion$name_match_source)
+  } else {
+    ""
+  }
+  match_reason <- if ("match_reason" %in% names(suggestion)) {
+    clean_text(suggestion$match_reason)
+  } else {
+    ""
+  }
+  name_detail <- ifelse(name_source == "", "", sprintf(" via %s", name_source))
+  reason_detail <- ifelse(match_reason == "", "", sprintf("reason %s; ", match_reason))
   sprintf(
-    "evidence: title similarity %.2f; email match %s; name match %s",
+    "evidence: %stitle similarity %.2f; email match %s; name match %s%s",
+    reason_detail,
     suggestion$title_similarity,
     ifelse(isTRUE(suggestion$email_match), "yes", "no"),
-    ifelse(isTRUE(suggestion$name_match), "yes", "no")
+    ifelse(isTRUE(suggestion$name_match), "yes", "no"),
+    name_detail
   )
 }
 
