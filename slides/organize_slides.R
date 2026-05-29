@@ -482,8 +482,46 @@ sanitize_path_component <- function(x, fallback = "unnamed") {
   x
 }
 
-presenter_last_name <- function(presenter_display) {
+strip_presenter_role_labels <- function(presenter_display) {
   presenter_display <- clean_text(presenter_display)
+  presenter_display <- str_replace_all(
+    presenter_display,
+    regex("\\s*\\((?:chair|moderator|session chair)\\)\\s*$", ignore_case = TRUE),
+    ""
+  )
+  presenter_display <- str_replace_all(
+    presenter_display,
+    regex("\\s*[-:\\u2013\\u2014]+\\s*(?:chair|moderator|session chair)\\s*$", ignore_case = TRUE),
+    ""
+  )
+  presenter_display <- str_replace_all(
+    presenter_display,
+    regex("^\\s*(?:chair|moderator|session chair)\\s*[-:\\u2013\\u2014]+\\s*", ignore_case = TRUE),
+    ""
+  )
+  str_squish(presenter_display)
+}
+
+is_role_only_presenter_label <- function(presenter_display) {
+  normalize_name(presenter_display) %in% c("chair", "moderator", "session chair")
+}
+
+presenter_name_for_filename <- function(presenter_display, authors = "") {
+  display_name <- strip_presenter_role_labels(presenter_display)
+  author_name <- clean_text(authors)
+  ifelse(
+    is_role_only_presenter_label(display_name) & author_name != "",
+    author_name,
+    ifelse(
+      display_name != "",
+      display_name,
+      ifelse(author_name != "", author_name, clean_text(presenter_display))
+    )
+  )
+}
+
+presenter_last_name <- function(presenter_display, authors = "") {
+  presenter_display <- presenter_name_for_filename(presenter_display, authors)
   first_presenter <- str_split(
     presenter_display,
     "\\s+(?:&|and)\\s+|\\s*/\\s*|,",
@@ -501,10 +539,10 @@ presenter_last_name <- function(presenter_display) {
   sanitize_path_component(last_names, fallback = "Presenter")
 }
 
-build_slide_filename <- function(talk_index, presenter_display) {
+build_slide_filename <- function(talk_index, presenter_display, authors = "") {
   talk_index <- suppressWarnings(as.integer(talk_index))
   prefix <- ifelse(is.na(talk_index), "00", sprintf("%02d", talk_index))
-  paste0(prefix, "_", presenter_last_name(presenter_display), ".pdf")
+  paste0(prefix, "_", presenter_last_name(presenter_display, authors), ".pdf")
 }
 
 build_slide_folder <- function(output_dir, room, day_num, block_num, time) {
@@ -717,11 +755,15 @@ read_programme_papers <- function(programme_source = "state", programme_json = "
       call. = FALSE
     )
   }
+  if (!"authors" %in% names(papers)) {
+    papers$authors <- ""
+  }
 
   papers %>%
     transmute(
       submission_id = clean_text(submission_id),
       title = clean_text(title),
+      authors = clean_text(authors),
       presenter_display = clean_text(presenter_display),
       room = clean_text(room),
       session_id = clean_text(session_id),
@@ -985,6 +1027,9 @@ reconcile_emails <- function(workbook_email, slides_csv_email) {
 }
 
 build_slide_status <- function(programme, slides, email_lookup, output_dir, match_rules = NULL) {
+  if (!"authors" %in% names(programme)) {
+    programme$authors <- ""
+  }
   slide_matches <- resolve_slide_matches(programme, slides, email_lookup, match_rules)
 
   status <- programme %>%
@@ -1006,7 +1051,7 @@ build_slide_status <- function(programme, slides, email_lookup, output_dir, matc
   )
   status$local_file_path <- fs::path(
     status$folder_path,
-    build_slide_filename(status$talk_index, status$presenter_display)
+    build_slide_filename(status$talk_index, status$presenter_display, status$authors)
   )
   status$status <- case_when(
     !is.na(status$csv_submission_id) & clean_text(status$slide_url) != "" ~ "matched",

@@ -55,6 +55,18 @@ test_normalization_and_sanitization <- function() {
   assert(sanitize_path_component("R2-01") == "R2-01", "room names should retain useful dashes")
   assert(sanitize_path_component(paste0("K", o_umlaut, "hler & Co")) == "Kohler-Co", "path components should transliterate and sanitize")
   assert(build_slide_filename(1, "Adrien Fabre") == "01_Fabre.pdf", "filename should use order and last name")
+  assert(
+    build_slide_filename(2, "Morten Nyborg Stostad (Moderator)") == "02_Stostad.pdf",
+    "filename should ignore trailing moderator labels"
+  )
+  assert(
+    build_slide_filename(3, "Chair", "Maria De la Cruz") == "03_Cruz.pdf",
+    "filename should fall back to the raw author name when display is only a chair label"
+  )
+  assert(
+    build_slide_filename(4, "Chair: Maria De la Cruz") == "04_Cruz.pdf",
+    "filename should ignore leading chair labels"
+  )
 
   folder <- build_slide_folder("exports/slides", "R2-01", 1, 1, "11h30-13h00")
   assert(
@@ -130,6 +142,28 @@ test_matching_and_email_reconciliation <- function() {
     "email reconciliation should cover all expected statuses"
   )
   assert(emails$contact_email[[2]] == "b@example.com", "mismatched emails should use the slide CSV email as contact_email")
+}
+
+test_chair_filename_uses_person_name <- function() {
+  temp_dir <- tempfile("slides-chair-output-")
+  programme <- fixture_programme("Known Title")[1, ] %>%
+    mutate(
+      authors = "Maria De la Cruz",
+      presenter_display = "Chair"
+    )
+  slides <- fixture_slides()[2, ]
+  email_lookup <- tibble(
+    submission_id = "A1",
+    workbook_email = "a@example.com",
+    workbook_title = "Known Title",
+    workbook_title_norm = normalize_title("Known Title")
+  )
+
+  status <- build_slide_status(programme, slides, email_lookup, temp_dir)
+  assert(
+    path_file(status$local_file_path[[1]]) == "01_Cruz.pdf",
+    "chair rows should name slide PDFs after the actual person"
+  )
 }
 
 test_workbook_title_fallback_matching <- function() {
@@ -644,6 +678,7 @@ tests <- list(
   test_csv_selection_by_mtime_fallback,
   test_normalization_and_sanitization,
   test_matching_and_email_reconciliation,
+  test_chair_filename_uses_person_name,
   test_workbook_title_fallback_matching,
   test_programme_json_loading_and_overflow_order,
   test_suggested_fuzzy_matches,
