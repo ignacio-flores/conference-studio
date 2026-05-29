@@ -232,15 +232,24 @@ test_programme_json_loading_and_overflow_order <- function() {
   assert(parsed$programme_source == "json", "--programme-json should switch the source to json")
   assert(parsed$review_suggested_matches, "suggested-match review should default to TRUE")
   assert(parsed$match_rules == "slides/slide_match_rules.csv", "default match-rule path should be set")
+  assert(parsed$review_unmatched_submissions, "unmatched-submission review should default to TRUE")
+  assert(
+    parsed$unmatched_decisions == "slides/unmatched_submission_decisions.csv",
+    "default unmatched-decision path should be set"
+  )
 
   parsed_review <- parse_cli_args(c(
     "--review-suggested-matches=FALSE",
     "--review-existing-rules=TRUE",
-    "--match-rules=/tmp/rules.csv"
+    "--match-rules=/tmp/rules.csv",
+    "--review-unmatched-submissions=FALSE",
+    "--unmatched-decisions=/tmp/unmatched.csv"
   ))
   assert(!parsed_review$review_suggested_matches, "--review-suggested-matches should parse FALSE")
   assert(parsed_review$review_existing_rules, "--review-existing-rules should parse TRUE")
   assert(parsed_review$match_rules == "/tmp/rules.csv", "--match-rules should accept a custom path")
+  assert(!parsed_review$review_unmatched_submissions, "--review-unmatched-submissions should parse FALSE")
+  assert(parsed_review$unmatched_decisions == "/tmp/unmatched.csv", "--unmatched-decisions should accept a custom path")
 }
 
 fixture_fuzzy_programme <- function() {
@@ -379,6 +388,142 @@ test_match_rules <- function() {
   assert(nrow(inactive_reject_suggestions) == 1, "inactive rejected rules should not suppress suggestions")
 }
 
+test_unmatched_decisions <- function() {
+  programme <- fixture_programme()
+  slides <- fixture_slides()
+  email_lookup <- tibble(
+    submission_id = c("A1", "B2"),
+    workbook_email = c("a@example.com", "b@example.com"),
+    workbook_title = c("Known Title", "Missing Title"),
+    workbook_title_norm = normalize_title(c("Known Title", "Missing Title"))
+  )
+  base_unmatched <- unmatched_slide_submissions(slides, programme, email_lookup)
+  unmatched_title_norm <- base_unmatched$submitted_title_norm[[1]]
+
+  excluded <- upsert_unmatched_decision(
+    empty_unmatched_decisions(),
+    submitted_title_norm = unmatched_title_norm,
+    decision = "exclude",
+    submitted_title = base_unmatched$submitted_title[[1]],
+    submitter_name = base_unmatched$submitter_name[[1]],
+    submitter_email = base_unmatched$submitter_email[[1]],
+    csv_submission_id = base_unmatched$csv_submission_id[[1]],
+    slide_url = base_unmatched$slide_url[[1]],
+    updated_at = "2026-05-28T12:00:00Z"
+  )
+  temp_decisions <- tempfile(fileext = ".csv")
+  write_unmatched_decisions(temp_decisions, excluded)
+  reloaded <- read_unmatched_decisions(temp_decisions)
+  assert(nrow(reloaded) == 1 && reloaded$decision == "exclude" && reloaded$active, "unmatched decisions should round-trip through CSV")
+
+  hidden_unmatched <- unmatched_slide_submissions(
+    slides,
+    programme,
+    email_lookup,
+    unmatched_decisions = reloaded
+  )
+  assert(nrow(hidden_unmatched) == 0, "active exclude decisions should hide submissions from unmatched output")
+
+  kept <- upsert_unmatched_decision(reloaded, unmatched_title_norm, "keep", updated_at = "2026-05-28T13:00:00Z")
+  kept_unmatched <- unmatched_slide_submissions(
+    slides,
+    programme,
+    email_lookup,
+    unmatched_decisions = kept
+  )
+  assert(nrow(kept_unmatched) == 1, "active keep decisions should remain in unmatched output")
+  assert(kept_unmatched$unmatched_decision == "keep", "kept unmatched submissions should carry decision metadata")
+
+  fuzzy_decision <- upsert_unmatched_decision(
+    empty_unmatched_decisions(),
+    fixture_fuzzy_slides()$title_norm[[1]],
+    "keep"
+  )
+  suppressed_suggestions <- generate_suggested_matches(
+    fixture_fuzzy_programme(),
+    fixture_fuzzy_slides(),
+    fixture_fuzzy_email_lookup(),
+    unmatched_decisions = fuzzy_decision
+  )
+  assert(nrow(suppressed_suggestions) == 0, "saved unmatched decisions should suppress future fuzzy prompts")
+}
+
+test_interactive_unmatched_review_injection <- function() {
+  programme <- fixture_programme()
+  slides <- fixture_slides()
+  email_lookup <- tibble(
+    submission_id = c("A1", "B2"),
+    workbook_email = c("a@example.com", "b@example.com"),
+    workbook_title = c("Known Title", "Missing Title"),
+    workbook_title_norm = normalize_title(c("Known Title", "Missing Title"))
+  )
+  unmatched <- unmatched_slide_submissions(slides, programme, email_lookup)
+
+  make_input <- function(responses) {
+    force(responses)
+    function(prompt = "") {
+      response <- responses[[1]]
+      responses <<- responses[-1]
+      response
+    }
+  }
+  output_fn <- function(text) invisible(NULL)
+
+  excluded <- review_unmatched_submissions(
+    unmatched,
+    programme = programme,
+    input_fn = make_input(c("e")),
+    output_fn = output_fn,
+    now_fn = function() "2026-05-28T12:00:00Z"
+  )
+  assert(excluded$decisions_changed && excluded$decisions$decision == "exclude", "exclude response should persist an exclude decision")
+
+  kept <- review_unmatched_submissions(
+    unmatched,
+    programme = programme,
+    input_fn = make_input(c("k")),
+    output_fn = output_fn,
+    now_fn = function() "2026-05-28T12:00:00Z"
+  )
+  assert(kept$decisions_changed && kept$decisions$decision == "keep", "keep response should persist a keep decision")
+
+  manual <- review_unmatched_submissions(
+    unmatched,
+    programme = programme,
+    input_fn = make_input(c("m", "B2")),
+    output_fn = output_fn,
+    now_fn = function() "2026-05-28T12:00:00Z"
+  )
+  assert(manual$rules_changed, "manual response should persist a match rule")
+  assert(manual$rules$decision == "accept" && manual$rules$programme_submission_id == "B2", "manual response should create an accepted rule")
+
+  slide_matches <- resolve_slide_matches(programme, slides, email_lookup, manual$rules)
+  after_manual <- unmatched_slide_submissions(
+    slides,
+    programme,
+    email_lookup,
+    manual$rules,
+    slide_matches
+  )
+  assert(nrow(after_manual) == 0, "manual accepted rules should remove the submission from unmatched output")
+
+  skipped <- review_unmatched_submissions(
+    unmatched,
+    programme = programme,
+    input_fn = make_input(c("s")),
+    output_fn = output_fn
+  )
+  assert(!skipped$changed && nrow(skipped$decisions) == 0 && nrow(skipped$rules) == 0, "skip response should not persist anything")
+
+  quit <- review_unmatched_submissions(
+    unmatched,
+    programme = programme,
+    input_fn = make_input(c("q")),
+    output_fn = output_fn
+  )
+  assert(quit$quit && !quit$changed, "quit response should stop review without persistence")
+}
+
 test_interactive_review_injection <- function() {
   suggestions <- generate_suggested_matches(
     fixture_fuzzy_programme(),
@@ -428,19 +573,28 @@ test_report_tabs <- function() {
   )
   summary <- summary_table(status, unmatched, selected_csv, no_download = TRUE, overwrite_pdfs = TRUE)
   report_path <- path(temp_dir, "slide_report.xlsx")
+  decisions <- upsert_unmatched_decision(
+    empty_unmatched_decisions(),
+    unmatched$submitted_title_norm[[1]],
+    "keep",
+    submitted_title = unmatched$submitted_title[[1]],
+    updated_at = "2026-05-28T12:00:00Z"
+  )
 
-  write_report(report_path, summary, status, unmatched)
+  write_report(report_path, summary, status, unmatched, unmatched_decisions = decisions)
   expected <- c(
     "summary",
     "slide_status",
     "missing_presentations",
     "unmatched_submissions",
+    "unmatched_decisions",
     "suggested_matches",
     "email_mismatches",
     "download_failures"
   )
   assert(file_exists(report_path), "report workbook should be written")
   assert(identical(getSheetNames(report_path), expected), "report workbook should contain the expected tabs")
+  assert(read.xlsx(report_path, sheet = "unmatched_decisions")$decision[[1]] == "keep", "unmatched decisions should be reported")
   assert(nrow(read.xlsx(report_path, sheet = "download_failures")) == 0, "empty report tabs should not contain blank rows")
 }
 
@@ -494,7 +648,9 @@ tests <- list(
   test_programme_json_loading_and_overflow_order,
   test_suggested_fuzzy_matches,
   test_match_rules,
+  test_unmatched_decisions,
   test_interactive_review_injection,
+  test_interactive_unmatched_review_injection,
   test_report_tabs,
   test_overwrite_pdf_behavior
 )

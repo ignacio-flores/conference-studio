@@ -30,6 +30,10 @@ usage <- function() {
       "  --match-rules=PATH       Persistent manual match rules CSV. Default: slides/slide_match_rules.csv",
       "  --review-existing-rules=BOOL",
       "                           Review saved match rules before applying suggestions. Default: FALSE",
+      "  --unmatched-decisions=PATH",
+      "                           Persistent decisions for unmatched submissions. Default: slides/unmatched_submission_decisions.csv",
+      "  --review-unmatched-submissions=BOOL",
+      "                           Review leftover unmatched submissions in the terminal. Default: TRUE",
       "  --help                   Print this help and exit.",
       "",
       "Examples:",
@@ -64,6 +68,8 @@ parse_cli_args <- function(args) {
     review_suggested_matches = TRUE,
     match_rules = "slides/slide_match_rules.csv",
     review_existing_rules = FALSE,
+    unmatched_decisions = "slides/unmatched_submission_decisions.csv",
+    review_unmatched_submissions = TRUE,
     help = FALSE
   )
 
@@ -98,6 +104,13 @@ parse_cli_args <- function(args) {
       options$review_existing_rules <- parse_bool(
         sub("^--review-existing-rules=", "", arg),
         "--review-existing-rules"
+      )
+    } else if (startsWith(arg, "--unmatched-decisions=")) {
+      options$unmatched_decisions <- sub("^--unmatched-decisions=", "", arg)
+    } else if (startsWith(arg, "--review-unmatched-submissions=")) {
+      options$review_unmatched_submissions <- parse_bool(
+        sub("^--review-unmatched-submissions=", "", arg),
+        "--review-unmatched-submissions"
       )
     } else {
       stop(sprintf("Unknown option: %s", arg), call. = FALSE)
@@ -311,8 +324,157 @@ upsert_match_rule <- function(
     bind_rows(replacement)
 }
 
+unmatched_decision_columns <- function() {
+  c(
+    "submitted_title_norm",
+    "decision",
+    "active",
+    "submitted_title",
+    "submitter_name",
+    "submitter_email",
+    "csv_submission_id",
+    "slide_url",
+    "notes",
+    "updated_at"
+  )
+}
+
+empty_unmatched_decisions <- function() {
+  tibble(
+    submitted_title_norm = character(),
+    decision = character(),
+    active = logical(),
+    submitted_title = character(),
+    submitter_name = character(),
+    submitter_email = character(),
+    csv_submission_id = character(),
+    slide_url = character(),
+    notes = character(),
+    updated_at = character()
+  )
+}
+
+coerce_unmatched_decisions <- function(decisions) {
+  if (is.null(decisions)) {
+    return(empty_unmatched_decisions())
+  }
+
+  decisions <- as_tibble(decisions)
+  for (column in unmatched_decision_columns()) {
+    if (!column %in% names(decisions)) {
+      decisions[[column]] <- if (identical(column, "active")) TRUE else ""
+    }
+  }
+
+  decisions <- decisions %>%
+    transmute(
+      submitted_title_norm = ifelse(
+        clean_text(submitted_title_norm) == "" & clean_text(submitted_title) != "",
+        normalize_title(submitted_title),
+        clean_text(submitted_title_norm)
+      ),
+      decision = str_to_lower(clean_text(decision)),
+      active = parse_rule_active(active),
+      submitted_title = clean_text(submitted_title),
+      submitter_name = clean_text(submitter_name),
+      submitter_email = clean_text(submitter_email),
+      csv_submission_id = clean_text(csv_submission_id),
+      slide_url = clean_text(slide_url),
+      notes = clean_text(notes),
+      updated_at = clean_text(updated_at)
+    ) %>%
+    filter(
+      submitted_title_norm != "",
+      decision %in% c("exclude", "keep")
+    )
+
+  if (nrow(decisions) == 0) {
+    return(empty_unmatched_decisions())
+  }
+
+  decisions
+}
+
+read_unmatched_decisions <- function(path) {
+  if (is.null(path) || clean_text(path) == "" || !file_exists(path)) {
+    return(empty_unmatched_decisions())
+  }
+
+  decisions <- read_csv(path, show_col_types = FALSE, col_types = cols(.default = col_character()))
+  coerce_unmatched_decisions(decisions)
+}
+
+write_unmatched_decisions <- function(path, decisions) {
+  decisions <- coerce_unmatched_decisions(decisions)
+  dir_create(path_dir(path))
+  write_csv(decisions, path, na = "")
+  invisible(path)
+}
+
+upsert_unmatched_decision <- function(
+  decisions,
+  submitted_title_norm,
+  decision,
+  submitted_title = "",
+  submitter_name = "",
+  submitter_email = "",
+  csv_submission_id = "",
+  slide_url = "",
+  notes = "",
+  active = TRUE,
+  updated_at = current_timestamp()
+) {
+  decisions <- coerce_unmatched_decisions(decisions)
+  submitted_title_norm <- clean_text(submitted_title_norm)
+  decision <- str_to_lower(clean_text(decision))
+
+  if (!decision %in% c("exclude", "keep")) {
+    stop("Unmatched decision must be exclude or keep.", call. = FALSE)
+  }
+  if (submitted_title_norm == "") {
+    stop("Unmatched decisions require submitted_title_norm.", call. = FALSE)
+  }
+
+  replacement <- tibble(
+    submitted_title_norm = submitted_title_norm,
+    decision = decision,
+    active = isTRUE(active),
+    submitted_title = clean_text(submitted_title),
+    submitter_name = clean_text(submitter_name),
+    submitter_email = clean_text(submitter_email),
+    csv_submission_id = clean_text(csv_submission_id),
+    slide_url = clean_text(slide_url),
+    notes = clean_text(notes),
+    updated_at = clean_text(updated_at)
+  )
+
+  decisions %>%
+    filter(submitted_title_norm != replacement$submitted_title_norm[[1]]) %>%
+    bind_rows(replacement)
+}
+
+latest_unmatched_decisions <- function(decisions) {
+  coerce_unmatched_decisions(decisions) %>%
+    arrange(submitted_title_norm, desc(updated_at)) %>%
+    group_by(submitted_title_norm) %>%
+    slice(1) %>%
+    ungroup()
+}
+
+unmatched_decision_state <- function(decisions) {
+  latest_unmatched_decisions(decisions) %>%
+    filter(active) %>%
+    transmute(
+      submitted_title_norm,
+      unmatched_decision = decision,
+      unmatched_decision_notes = notes,
+      unmatched_decision_updated_at = updated_at
+    )
+}
+
 sanitize_path_component <- function(x, fallback = "unnamed") {
   x <- ascii_transliterate(x)
+  x <- str_replace_all(x, "[\"']", "")
   x <- str_replace_all(x, "[^A-Za-z0-9._-]+", "-")
   x <- str_replace_all(x, "-+", "-")
   x <- str_replace_all(x, "^[._-]+|[._-]+$", "")
@@ -892,7 +1054,8 @@ unmatched_slide_submissions <- function(
   programme,
   email_lookup = NULL,
   match_rules = NULL,
-  slide_matches = NULL
+  slide_matches = NULL,
+  unmatched_decisions = NULL
 ) {
   matched_title_norms <- unique(programme$title_norm)
   if (!is.null(email_lookup)) {
@@ -917,16 +1080,26 @@ unmatched_slide_submissions <- function(
     matched_title_norms <- unique(c(matched_title_norms, slide_matches$submitted_title_norm))
   }
 
+  decision_state <- unmatched_decision_state(unmatched_decisions)
+
   slides %>%
     filter(title_norm != "", !(title_norm %in% matched_title_norms)) %>%
     transmute(
       submitter_name,
       submitter_email = slides_csv_email,
       submitted_title,
+      submitted_title_norm = title_norm,
       slide_url,
       csv_submission_id,
       slide_submitted_at
     ) %>%
+    left_join(decision_state, by = "submitted_title_norm") %>%
+    mutate(
+      unmatched_decision = ifelse(is.na(unmatched_decision), "", unmatched_decision),
+      unmatched_decision_notes = ifelse(is.na(unmatched_decision_notes), "", unmatched_decision_notes),
+      unmatched_decision_updated_at = ifelse(is.na(unmatched_decision_updated_at), "", unmatched_decision_updated_at)
+    ) %>%
+    filter(unmatched_decision != "exclude") %>%
     arrange(submitted_title, desc(slide_submitted_at))
 }
 
@@ -1000,11 +1173,13 @@ generate_suggested_matches <- function(
   slides,
   email_lookup,
   match_rules = NULL,
+  unmatched_decisions = NULL,
   existing_matches = NULL,
   max_suggestions = 3
 ) {
   email_lookup <- ensure_email_lookup_columns(email_lookup)
   rules <- coerce_match_rules(match_rules)
+  decision_state <- unmatched_decision_state(unmatched_decisions)
   if (is.null(existing_matches)) {
     existing_matches <- resolve_slide_matches(programme, slides, email_lookup, rules)
   }
@@ -1013,9 +1188,14 @@ generate_suggested_matches <- function(
   if ("submitted_title_norm" %in% names(existing_matches)) {
     matched_title_norms <- unique(c(matched_title_norms, existing_matches$submitted_title_norm))
   }
+  decided_title_norms <- unique(decision_state$submitted_title_norm)
 
   unmatched_slides <- latest_submission_per_title(slides) %>%
-    filter(title_norm != "", !(title_norm %in% matched_title_norms)) %>%
+    filter(
+      title_norm != "",
+      !(title_norm %in% matched_title_norms),
+      !(title_norm %in% decided_title_norms)
+    ) %>%
     transmute(
       join_key = 1L,
       submitter_name,
@@ -1291,6 +1471,175 @@ review_suggested_matches <- function(
   list(rules = coerce_match_rules(rules), changed = changed, quit = quit)
 }
 
+review_unmatched_submissions <- function(
+  unmatched_submissions,
+  decisions = NULL,
+  rules = NULL,
+  programme = NULL,
+  input_fn = terminal_input,
+  output_fn = cat,
+  now_fn = current_timestamp
+) {
+  decisions <- coerce_unmatched_decisions(decisions)
+  rules <- coerce_match_rules(rules)
+  unmatched_submissions <- as_tibble(unmatched_submissions)
+  if (nrow(unmatched_submissions) == 0) {
+    return(list(
+      decisions = decisions,
+      rules = rules,
+      decisions_changed = FALSE,
+      rules_changed = FALSE,
+      changed = FALSE,
+      quit = FALSE
+    ))
+  }
+
+  if (!"submitted_title_norm" %in% names(unmatched_submissions)) {
+    unmatched_submissions$submitted_title_norm <- normalize_title(unmatched_submissions$submitted_title)
+  }
+  if (!"unmatched_decision" %in% names(unmatched_submissions)) {
+    unmatched_submissions$unmatched_decision <- ""
+  }
+
+  review_rows <- unmatched_submissions %>%
+    filter(unmatched_decision == "") %>%
+    arrange(submitted_title, desc(slide_submitted_at)) %>%
+    group_by(submitted_title_norm) %>%
+    slice(1) %>%
+    ungroup()
+
+  if (nrow(review_rows) == 0) {
+    return(list(
+      decisions = decisions,
+      rules = rules,
+      decisions_changed = FALSE,
+      rules_changed = FALSE,
+      changed = FALSE,
+      quit = FALSE
+    ))
+  }
+
+  programme_lookup <- NULL
+  if (!is.null(programme)) {
+    programme_lookup <- as_tibble(programme) %>%
+      transmute(
+        programme_submission_id = clean_text(submission_id),
+        programme_title = clean_text(title),
+        programme_presenter = clean_text(presenter_display)
+      )
+  }
+
+  decisions_changed <- FALSE
+  rules_changed <- FALSE
+  quit <- FALSE
+  for (row_index in seq_len(nrow(review_rows))) {
+    submission <- review_rows[row_index, ]
+    write_review_line(output_fn)
+    write_review_line(output_fn, sprintf("Unmatched slide submission %s/%s", row_index, nrow(review_rows)))
+    write_review_line(output_fn, sprintf("  submitter: %s <%s>", submission$submitter_name, submission$submitter_email))
+    write_review_line(output_fn, sprintf("  title: %s", submission$submitted_title))
+    write_review_line(output_fn, sprintf("  csv submission id: %s", submission$csv_submission_id))
+
+    repeat {
+      answer <- str_to_lower(str_trim(input_fn("Exclude/keep/manual/skip/quit? [e/k/m/s/q]: ")))
+      if (answer == "") {
+        answer <- "s"
+      }
+
+      if (answer == "e") {
+        decisions <- upsert_unmatched_decision(
+          decisions,
+          submitted_title_norm = submission$submitted_title_norm,
+          decision = "exclude",
+          submitted_title = submission$submitted_title,
+          submitter_name = submission$submitter_name,
+          submitter_email = submission$submitter_email,
+          csv_submission_id = submission$csv_submission_id,
+          slide_url = submission$slide_url,
+          updated_at = now_fn()
+        )
+        decisions_changed <- TRUE
+        break
+      }
+
+      if (answer == "k") {
+        decisions <- upsert_unmatched_decision(
+          decisions,
+          submitted_title_norm = submission$submitted_title_norm,
+          decision = "keep",
+          submitted_title = submission$submitted_title,
+          submitter_name = submission$submitter_name,
+          submitter_email = submission$submitter_email,
+          csv_submission_id = submission$csv_submission_id,
+          slide_url = submission$slide_url,
+          updated_at = now_fn()
+        )
+        decisions_changed <- TRUE
+        break
+      }
+
+      if (answer == "m") {
+        programme_submission_id <- clean_text(input_fn("Programme submission ID: "))
+        if (programme_submission_id == "") {
+          write_review_line(output_fn, "  No ID entered; skipped.")
+          break
+        }
+        programme_title <- ""
+        programme_presenter <- ""
+        if (!is.null(programme_lookup)) {
+          entered_programme <- programme_lookup %>%
+            filter(programme_submission_id == !!programme_submission_id) %>%
+            slice(1)
+          if (nrow(entered_programme) == 0) {
+            write_review_line(output_fn, sprintf("  Programme submission ID not found: %s", programme_submission_id))
+            next
+          }
+          programme_title <- entered_programme$programme_title[[1]]
+          programme_presenter <- entered_programme$programme_presenter[[1]]
+        }
+        rules <- upsert_match_rule(
+          rules,
+          programme_submission_id = programme_submission_id,
+          submitted_title_norm = submission$submitted_title_norm,
+          decision = "accept",
+          submitted_title = submission$submitted_title,
+          programme_title = programme_title,
+          submitter_name = submission$submitter_name,
+          programme_presenter = programme_presenter,
+          notes = "manual programme_submission_id entered during unmatched review",
+          updated_at = now_fn()
+        )
+        rules_changed <- TRUE
+        break
+      }
+
+      if (answer == "s") {
+        break
+      }
+
+      if (answer == "q") {
+        quit <- TRUE
+        break
+      }
+
+      write_review_line(output_fn, "  Enter e, k, m, s, or q.")
+    }
+
+    if (quit) {
+      break
+    }
+  }
+
+  list(
+    decisions = coerce_unmatched_decisions(decisions),
+    rules = coerce_match_rules(rules),
+    decisions_changed = decisions_changed,
+    rules_changed = rules_changed,
+    changed = decisions_changed || rules_changed,
+    quit = quit
+  )
+}
+
 review_existing_match_rules <- function(
   rules,
   input_fn = terminal_input,
@@ -1561,7 +1910,8 @@ write_report <- function(
   summary,
   slide_status,
   unmatched_submissions,
-  suggested_matches = empty_suggested_matches()
+  suggested_matches = empty_suggested_matches(),
+  unmatched_decisions = empty_unmatched_decisions()
 ) {
   dir_create(path_dir(report_path))
   workbook <- createWorkbook()
@@ -1577,6 +1927,7 @@ write_report <- function(
     ),
     missing_presentations = missing_presentations_table(slide_status),
     unmatched_submissions = unmatched_submissions,
+    unmatched_decisions = latest_unmatched_decisions(unmatched_decisions),
     suggested_matches = suggested_matches,
     email_mismatches = email_mismatches_table(slide_status),
     download_failures = download_failures_table(slide_status)
@@ -1627,11 +1978,13 @@ run_workflow <- function(options) {
   message(sprintf("Using email workbook: %s", options$email_workbook))
   message(sprintf("Writing slide outputs under: %s", options$output_dir))
   message(sprintf("Using slide match rules: %s", options$match_rules))
+  message(sprintf("Using unmatched-submission decisions: %s", options$unmatched_decisions))
 
   programme <- read_programme_papers(options$programme_source, options$programme_json)
   slides <- read_slide_submissions(selected_csv$path)
   email_lookup <- read_email_lookup(options$email_workbook)
   match_rules <- read_match_rules(options$match_rules)
+  unmatched_decisions <- read_unmatched_decisions(options$unmatched_decisions)
 
   if (options$review_existing_rules) {
     if (can_prompt_in_terminal()) {
@@ -1651,6 +2004,7 @@ run_workflow <- function(options) {
     slides,
     email_lookup,
     match_rules,
+    unmatched_decisions,
     existing_matches = slide_matches
   )
 
@@ -1666,6 +2020,7 @@ run_workflow <- function(options) {
           slides,
           email_lookup,
           match_rules,
+          unmatched_decisions,
           existing_matches = slide_matches
         )
       }
@@ -1677,14 +2032,59 @@ run_workflow <- function(options) {
     }
   }
 
-  slide_status <- build_slide_status(programme, slides, email_lookup, options$output_dir, match_rules)
   unmatched <- unmatched_slide_submissions(
     slides,
     programme,
     email_lookup,
     match_rules,
-    slide_matches = slide_matches
+    slide_matches = slide_matches,
+    unmatched_decisions = unmatched_decisions
   )
+
+  if (options$review_unmatched_submissions && nrow(unmatched %>% filter(unmatched_decision == "")) > 0) {
+    if (can_prompt_in_terminal()) {
+      review_result <- review_unmatched_submissions(
+        unmatched,
+        decisions = unmatched_decisions,
+        rules = match_rules,
+        programme = programme
+      )
+      unmatched_decisions <- review_result$decisions
+      match_rules <- review_result$rules
+      if (review_result$decisions_changed) {
+        write_unmatched_decisions(options$unmatched_decisions, unmatched_decisions)
+      }
+      if (review_result$rules_changed) {
+        write_match_rules(options$match_rules, match_rules)
+        slide_matches <- resolve_slide_matches(programme, slides, email_lookup, match_rules)
+      }
+      if (review_result$changed) {
+        suggested_matches <- generate_suggested_matches(
+          programme,
+          slides,
+          email_lookup,
+          match_rules,
+          unmatched_decisions,
+          existing_matches = slide_matches
+        )
+        unmatched <- unmatched_slide_submissions(
+          slides,
+          programme,
+          email_lookup,
+          match_rules,
+          slide_matches = slide_matches,
+          unmatched_decisions = unmatched_decisions
+        )
+      }
+    } else {
+      message(sprintf(
+        "Found %s undecided unmatched submission(s); skipping terminal review because stdin is not a terminal.",
+        nrow(unmatched %>% filter(unmatched_decision == ""))
+      ))
+    }
+  }
+
+  slide_status <- build_slide_status(programme, slides, email_lookup, options$output_dir, match_rules)
 
   slide_status <- process_downloads(
     slide_status,
@@ -1703,7 +2103,7 @@ run_workflow <- function(options) {
   )
 
   report_path <- fs::path(options$output_dir, "slide_report.xlsx")
-  write_report(report_path, summary, slide_status, unmatched, suggested_matches)
+  write_report(report_path, summary, slide_status, unmatched, suggested_matches, unmatched_decisions)
 
   message(sprintf("Wrote report: %s", report_path))
   message(sprintf(
@@ -1723,6 +2123,7 @@ run_workflow <- function(options) {
     unmatched_submissions = unmatched,
     suggested_matches = suggested_matches,
     match_rules = match_rules,
+    unmatched_decisions = unmatched_decisions,
     summary = summary,
     report_path = report_path
   ))

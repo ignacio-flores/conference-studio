@@ -51,6 +51,11 @@ All options:
 --output-dir=PATH
 --no-download=TRUE
 --overwrite-pdfs=TRUE|FALSE
+--review-suggested-matches=TRUE|FALSE
+--match-rules=PATH
+--review-existing-rules=TRUE|FALSE
+--unmatched-decisions=PATH
+--review-unmatched-submissions=TRUE|FALSE
 --help
 ```
 
@@ -83,17 +88,37 @@ Report tabs:
 - `summary`: counts for programme presentations, matched decks, missing decks, unmatched submissions, downloads, email statuses, and selected CSV metadata.
 - `slide_status`: one row per programme presentation, including scheduling fields, title, match method, deck URL, local file path, contact email fields, and download status.
 - `missing_presentations`: programme presentations without a matched deck URL.
-- `unmatched_submissions`: slide submissions whose normalized title cannot be connected to a programme row.
+- `unmatched_submissions`: slide submissions whose normalized title cannot be connected to a programme row, excluding submissions deliberately marked as excluded.
+- `unmatched_decisions`: saved keep/exclude decisions for unmatched slide submissions.
+- `suggested_matches`: likely fuzzy title matches that remain available for review.
 - `email_mismatches`: matched rows where the reviewed workbook email and slide CSV email differ after trimming and lowercasing.
 - `download_failures`: matched rows whose PDF download failed.
 
 ## Matching Rules
 
-Slide submissions are matched to programme presentations by deterministic normalized title keys. Normalization lowercases titles, transliterates accents, and ignores whitespace, casing, punctuation, common smart quotes, and dash variants. The script does not fuzzy-place unmatched submissions.
+Slide submissions are first matched to programme presentations by deterministic normalized title keys. Normalization lowercases titles, transliterates accents, and ignores whitespace, casing, punctuation, common smart quotes, and dash variants.
 
 The primary match is slide CSV title to programme title. If that fails, the script tries slide CSV title to reviewed workbook title, then uses the workbook `SubmissionID` only when that submission ID exists in the programme.
 
 If multiple slide submissions have the same normalized title, the newest submitted row is used for the programme match.
+
+After deterministic matching, the script can suggest likely fuzzy matches in an interactive terminal. Accepting a suggestion writes an `accept` rule to `slides/slide_match_rules.csv`; rejecting one writes a `reject` rule so that pair is not suggested again. Use `--review-suggested-matches=FALSE` to skip this prompt, `--match-rules=PATH` to change the rule file, and `--review-existing-rules=TRUE` to inspect saved rules before applying new suggestions.
+
+## Unmatched Submission Decisions
+
+After fuzzy-match review, the script can review submissions that still remain unmatched. The prompt is:
+
+```text
+Exclude/keep/manual/skip/quit? [e/k/m/s/q]:
+```
+
+- `exclude`: hide the submitted title from future `unmatched_submissions` counts and prompts, while keeping the decision in the `unmatched_decisions` report tab.
+- `keep`: leave the submitted title in `unmatched_submissions`, but do not prompt for it again.
+- `manual`: enter a programme `submission_id`; this creates the same accepted match rule used by fuzzy review.
+- `skip`: leave the title undecided for this run.
+- `quit`: stop the unmatched-review prompt.
+
+Unmatched decisions are saved by normalized submitted title in `slides/unmatched_submission_decisions.csv` by default. Use `--unmatched-decisions=PATH` to change the file, or `--review-unmatched-submissions=FALSE` to skip this prompt. Saved keep/exclude decisions also suppress future fuzzy suggestions for that submitted title.
 
 ## Email Rules
 
@@ -129,6 +154,6 @@ The report workbook is always regenerated.
 
 - If no CSV is found, put the slide-submission CSV in `slides/` or pass `--slides-csv=PATH`.
 - If the wrong CSV is selected, use `--slides-csv=PATH`.
-- If titles appear in `unmatched_submissions`, compare them with `slide_status$title`; the workflow only does normalized exact matching.
+- If titles appear in `unmatched_submissions`, compare them with `slide_status$title`, then rerun interactively to accept a fuzzy/manual match, keep the title as unmatched, or exclude it.
 - If downloads fail, inspect `download_failures` for HTTP status and error detail, then rerun. Successful rows continue even when individual downloads fail.
 - If you only want to inspect matching and reports, run with `--no-download=TRUE`.
